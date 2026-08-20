@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy, StrategyOptionsWithRequest } from 'passport-jwt';
 import { Request } from 'express';
+import { I18nService } from 'nestjs-i18n';
 import { extractBearerToken } from '../../../common/utils/extract-bearer-token';
 import { RedisService } from '../../../redis/redis.service';
 import { UsersService } from '../../users/users.service';
@@ -17,6 +18,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     config: ConfigService,
     private readonly usersService: UsersService,
     private readonly redisService: RedisService,
+    private readonly i18n: I18nService,
   ) {
     const options: StrategyOptionsWithRequest = {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -30,12 +32,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   async validate(req: Request, payload: JwtPayload) {
     const token = extractBearerToken(req);
     if (token && (await this.redisService.isTokenBlacklisted(token))) {
-      throw new UnauthorizedException('Token has been revoked');
+      throw new UnauthorizedException(this.i18n.t('errors.tokenRevoked'));
     }
 
     const user = await this.usersService.findById(payload.sub);
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new UnauthorizedException(this.i18n.t('errors.userNotFound'));
     }
 
     return user;

@@ -6,8 +6,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../../redis/redis.service';
-import { User } from '../users/entities/user.entity';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -21,12 +22,13 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
     private readonly config: ConfigService,
+    private readonly i18n: I18nService,
   ) {}
 
-  async register(dto: RegisterDto): Promise<{ user: User; token: string }> {
+  async register(dto: RegisterDto): Promise<UserResponseDto> {
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
-      throw new ConflictException('Email already registered');
+      throw new ConflictException(this.i18n.t('errors.emailAlreadyRegistered'));
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, SALT_ROUNDS);
@@ -36,16 +38,16 @@ export class AuthService {
       password: hashedPassword,
     });
 
-    return { user, token: this.signToken(user.id) };
+    return UserResponseDto.fromEntity(user, this.signToken(user.id));
   }
 
-  async login(dto: LoginDto): Promise<{ user: User; token: string }> {
+  async login(dto: LoginDto): Promise<UserResponseDto> {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user || !(await bcrypt.compare(dto.password, user.password))) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(this.i18n.t('errors.invalidCredentials'));
     }
 
-    return { user, token: this.signToken(user.id) };
+    return UserResponseDto.fromEntity(user, this.signToken(user.id));
   }
 
   async logout(token: string): Promise<void> {

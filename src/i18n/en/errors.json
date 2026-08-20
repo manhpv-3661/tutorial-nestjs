@@ -1,0 +1,6 @@
+{
+  "emailAlreadyRegistered": "Email already registered",
+  "invalidCredentials": "Invalid credentials",
+  "tokenRevoked": "Token has been revoked",
+  "userNotFound": "User not found"
+}

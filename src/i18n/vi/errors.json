@@ -1,0 +1,6 @@
+{
+  "emailAlreadyRegistered": "Email đã được đăng ký",
+  "invalidCredentials": "Sai email hoặc mật khẩu",
+  "tokenRevoked": "Token đã bị vô hiệu hoá",
+  "userNotFound": "Không tìm thấy người dùng"
+}

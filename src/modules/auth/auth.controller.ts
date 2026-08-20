@@ -11,6 +11,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { extractBearerToken } from '../../common/utils/extract-bearer-token';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import type { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -23,12 +24,12 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('users')
-  register(@Body() dto: RegisterDto) {
+  register(@Body() dto: RegisterDto): Promise<UserResponseDto> {
     return this.authService.register(dto);
   }
 
   @Post('users/login')
-  login(@Body() dto: LoginDto) {
+  login(@Body() dto: LoginDto): Promise<UserResponseDto> {
     return this.authService.login(dto);
   }
 
@@ -46,7 +47,10 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get('user')
-  getCurrentUser(@CurrentUser() user: User): User {
-    return user;
+  getCurrentUser(
+    @CurrentUser() user: User,
+    @Req() req: Request,
+  ): UserResponseDto {
+    return UserResponseDto.fromEntity(user, extractBearerToken(req) ?? '');
   }
 }
