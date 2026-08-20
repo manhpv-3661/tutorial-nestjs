@@ -8,9 +8,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { ExtractJwt } from 'passport-jwt';
 import type { Request } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { extractBearerToken } from '../../common/utils/extract-bearer-token';
 import type { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -37,7 +37,7 @@ export class AuthController {
   @Post('users/logout')
   @HttpCode(204)
   async logout(@Req() req: Request): Promise<void> {
-    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+    const token = extractBearerToken(req);
     if (token) {
       await this.authService.logout(token);
     }

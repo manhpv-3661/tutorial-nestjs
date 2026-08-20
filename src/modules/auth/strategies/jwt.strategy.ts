@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy, StrategyOptionsWithRequest } from 'passport-jwt';
 import { Request } from 'express';
+import { extractBearerToken } from '../../../common/utils/extract-bearer-token';
 import { RedisService } from '../../../redis/redis.service';
 import { UsersService } from '../../users/users.service';
 
@@ -27,7 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(req: Request, payload: JwtPayload) {
-    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+    const token = extractBearerToken(req);
     if (token && (await this.redisService.isTokenBlacklisted(token))) {
       throw new UnauthorizedException('Token has been revoked');
     }
