@@ -10,7 +10,6 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { extractBearerToken } from '../../common/utils/extract-bearer-token';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import type { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
@@ -37,10 +36,9 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('users/logout')
   @HttpCode(204)
-  async logout(@Req() req: Request): Promise<void> {
-    const token = extractBearerToken(req);
-    if (token) {
-      await this.authService.logout(token);
+  async logout(@Req() req: Request & { token?: string }): Promise<void> {
+    if (req.token) {
+      await this.authService.logout(req.token);
     }
   }
 
@@ -49,8 +47,8 @@ export class AuthController {
   @Get('user')
   getCurrentUser(
     @CurrentUser() user: User,
-    @Req() req: Request,
+    @Req() req: Request & { token?: string },
   ): UserResponseDto {
-    return UserResponseDto.fromEntity(user, extractBearerToken(req) ?? '');
+    return UserResponseDto.fromEntity(user, req.token ?? '');
   }
 }

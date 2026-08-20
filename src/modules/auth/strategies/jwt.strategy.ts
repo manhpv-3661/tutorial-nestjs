@@ -29,7 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super(options);
   }
 
-  async validate(req: Request, payload: JwtPayload) {
+  async validate(req: Request & { token?: string }, payload: JwtPayload) {
     const token = extractBearerToken(req);
     if (token && (await this.redisService.isTokenBlacklisted(token))) {
       throw new UnauthorizedException(this.i18n.t('errors.tokenRevoked'));
@@ -40,6 +40,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException(this.i18n.t('errors.userNotFound'));
     }
 
+    req.token = token ?? undefined;
     return user;
   }
 }
