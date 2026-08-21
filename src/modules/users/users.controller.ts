@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Put,
@@ -21,6 +22,7 @@ import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 
 const SALT_ROUNDS = 10;
+const ALLOWED_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 @ApiTags('user')
 @ApiBearerAuth()
@@ -35,7 +37,21 @@ export class UsersController {
   @Put()
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
-    FileInterceptor('avatar', { limits: { fileSize: 10 * 1024 * 1024 } }),
+    FileInterceptor('avatar', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, callback) => {
+        if (!ALLOWED_AVATAR_MIME_TYPES.includes(file.mimetype)) {
+          callback(
+            new BadRequestException(
+              `Avatar must be one of: ${ALLOWED_AVATAR_MIME_TYPES.join(', ')}`,
+            ),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
   )
   async updateCurrentUser(
     @CurrentUser() currentUser: User,
@@ -67,6 +83,10 @@ export class UsersController {
     }
 
     if (avatar) {
+      await this.attachmentsService.deleteAllForOwner(
+        AttachmentOwnerType.USER_AVATAR,
+        currentUser.id,
+      );
       const attachment = await this.attachmentsService.saveFile(
         AttachmentOwnerType.USER_AVATAR,
         currentUser.id,

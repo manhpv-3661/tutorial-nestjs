@@ -54,4 +54,20 @@ export class AttachmentsService {
     }
     return attachment;
   }
+
+  async deleteAllForOwner(
+    ownerType: AttachmentOwnerType,
+    ownerId: string,
+  ): Promise<void> {
+    const attachments = await this.attachmentsRepository.find({
+      where: { ownerType, ownerId },
+    });
+
+    for (const attachment of attachments) {
+      await fs.unlink(attachment.path).catch(() => undefined);
+    }
+    if (attachments.length > 0) {
+      await this.attachmentsRepository.remove(attachments);
+    }
+  }
 }

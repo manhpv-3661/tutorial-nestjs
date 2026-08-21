@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
+import { QueryFailedError } from 'typeorm';
 import { Follow } from './entities/follow.entity';
 import { FollowsService } from './follows.service';
 
@@ -84,6 +85,28 @@ describe('FollowsService', () => {
         followerId: 'a',
         followingId: 'b',
       });
+    });
+
+    it('maps a race-condition unique-violation on save to ConflictException', async () => {
+      repository.findOne.mockResolvedValue(null);
+      const dbError = new QueryFailedError('INSERT ...', [], {
+        code: '23505',
+      } as unknown as Error);
+      repository.save.mockRejectedValue(dbError);
+
+      await expect(followsService.follow('a', 'b')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('rethrows any other database error from save unchanged', async () => {
+      repository.findOne.mockResolvedValue(null);
+      const dbError = new QueryFailedError('INSERT ...', [], {
+        code: '23502',
+      } as unknown as Error);
+      repository.save.mockRejectedValue(dbError);
+
+      await expect(followsService.follow('a', 'b')).rejects.toBe(dbError);
     });
   });
 
