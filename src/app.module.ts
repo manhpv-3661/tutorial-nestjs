@@ -27,8 +27,11 @@ import { RedisModule } from './redis/redis.module';
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) =>
-        config.get<DataSourceOptions>('typeorm')!,
+      useFactory: (config: ConfigService) => ({
+        ...config.get<DataSourceOptions>('typeorm')!,
+        retryAttempts: 3,
+        retryDelay: 1000,
+      }),
     }),
     I18nModule.forRoot({
       fallbackLanguage: 'en',
