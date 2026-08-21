@@ -1,0 +1,6 @@
+{
+  "IS_EMAIL": "Email không hợp lệ",
+  "IS_STRING": "Giá trị phải là chuỗi ký tự",
+  "MIN_LENGTH_USERNAME": "Username phải có ít nhất 3 ký tự",
+  "MIN_LENGTH_PASSWORD": "Password phải có ít nhất 8 ký tự"
+}
