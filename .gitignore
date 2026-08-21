@@ -56,3 +56,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Sunlint temp files
 .sunlint-eslint.config.js
+
+# Local file uploads
+/storage/uploads
