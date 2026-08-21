@@ -20,7 +20,12 @@ export class AttachmentsService {
   async saveFile(
     ownerType: AttachmentOwnerType,
     ownerId: string,
-    file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+    file: {
+      originalname: string;
+      mimetype: string;
+      size: number;
+      buffer: Buffer;
+    },
   ): Promise<Attachment> {
     await fs.mkdir(STORAGE_ROOT, { recursive: true });
 

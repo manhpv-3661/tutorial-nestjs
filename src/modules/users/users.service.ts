@@ -17,6 +17,10 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { email } });
   }
 
+  findByUsername(username: string): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { username } });
+  }
+
   findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
   }
@@ -41,5 +45,31 @@ export class UsersService {
       }
       throw error;
     }
+  }
+
+  async updateById(
+    id: string,
+    data: Partial<{
+      username: string;
+      email: string;
+      password: string;
+      bio: string;
+      image: string;
+    }>,
+  ): Promise<User> {
+    await this.usersRepository.update(id, data).catch((error: unknown) => {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string })?.code ===
+          POSTGRES_UNIQUE_VIOLATION
+      ) {
+        throw new ConflictException(
+          this.i18n.t('errors.usernameOrEmailAlreadyRegistered'),
+        );
+      }
+      throw error;
+    });
+
+    return (await this.findById(id))!;
   }
 }

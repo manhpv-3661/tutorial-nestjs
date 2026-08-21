@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateAttachmentsTable1787222453692
-  implements MigrationInterface
-{
+export class CreateAttachmentsTable1787222453692 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE "attachments" (
