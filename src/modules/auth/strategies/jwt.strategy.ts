@@ -20,10 +20,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly redisService: RedisService,
     private readonly i18n: I18nService,
   ) {
+    const secret = config.get<string>('JWT_SECRET');
+    if (!secret) {
+      throw new Error('JWT_SECRET is not configured');
+    }
+
     const options: StrategyOptionsWithRequest = {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_SECRET') ?? '',
+      secretOrKey: secret,
       passReqToCallback: true,
     };
     super(options);

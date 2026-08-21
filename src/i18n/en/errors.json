@@ -2,5 +2,6 @@
   "emailAlreadyRegistered": "Email already registered",
   "invalidCredentials": "Invalid credentials",
   "tokenRevoked": "Token has been revoked",
-  "userNotFound": "User not found"
+  "userNotFound": "User not found",
+  "usernameOrEmailAlreadyRegistered": "Username or email already registered"
 }

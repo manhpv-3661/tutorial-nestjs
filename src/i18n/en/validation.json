@@ -1,0 +1,6 @@
+{
+  "IS_EMAIL": "Email must be a valid email address",
+  "IS_STRING": "This field must be a string",
+  "MIN_LENGTH_USERNAME": "Username must be at least 3 characters",
+  "MIN_LENGTH_PASSWORD": "Password must be at least 8 characters"
+}

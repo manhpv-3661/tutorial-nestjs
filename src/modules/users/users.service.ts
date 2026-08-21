@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { I18nService } from 'nestjs-i18n';
 import { QueryFailedError, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 
@@ -9,6 +10,7 @@ const POSTGRES_UNIQUE_VIOLATION = '23505';
 export class UsersService {
   constructor(
     @InjectRepository(User) private readonly usersRepository: Repository<User>,
+    private readonly i18n: I18nService,
   ) {}
 
   findByEmail(email: string): Promise<User | null> {
@@ -33,7 +35,9 @@ export class UsersService {
         (error.driverError as { code?: string })?.code ===
           POSTGRES_UNIQUE_VIOLATION
       ) {
-        throw new ConflictException('Username or email already registered');
+        throw new ConflictException(
+          this.i18n.t('errors.usernameOrEmailAlreadyRegistered'),
+        );
       }
       throw error;
     }

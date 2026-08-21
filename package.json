@@ -39,6 +39,7 @@
     "class-validator": "^0.15.1",
     "dotenv": "^17.4.2",
     "ioredis": "^5.11.1",
+    "joi": "^18.2.5",
     "nestjs-i18n": "^10.8.5",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
