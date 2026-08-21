@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
@@ -18,6 +18,7 @@ describe('UsersService', () => {
     create: jest.Mock<CreateUserInput, [CreateUserInput]>;
     save: jest.Mock;
     findOne: jest.Mock;
+    update: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -25,6 +26,7 @@ describe('UsersService', () => {
       create: jest.fn((data: CreateUserInput) => data),
       save: jest.fn(),
       findOne: jest.fn(),
+      update: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -74,6 +76,60 @@ describe('UsersService', () => {
       repository.save.mockRejectedValue(dbError);
 
       await expect(usersService.create(data)).rejects.toBe(dbError);
+    });
+  });
+
+  describe('updateById', () => {
+    it('skips the update call and returns the current user when data is empty', async () => {
+      repository.findOne.mockResolvedValue({ id: 'user-id' });
+
+      const result = await usersService.updateById('user-id', {});
+
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 'user-id' });
+    });
+
+    it('throws NotFoundException when the user no longer exists', async () => {
+      repository.update.mockResolvedValue({ affected: 1 });
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(
+        usersService.updateById('missing-id', { bio: 'hi' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('maps a username unique-violation to usernameAlreadyTaken', async () => {
+      const dbError = new QueryFailedError('UPDATE ...', [], {
+        code: '23505',
+        constraint: 'UQ_users_username',
+      } as unknown as Error);
+      repository.update.mockRejectedValue(dbError);
+
+      await expect(
+        usersService.updateById('user-id', { username: 'taken' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('maps an email unique-violation to emailAlreadyRegistered', async () => {
+      const dbError = new QueryFailedError('UPDATE ...', [], {
+        code: '23505',
+        constraint: 'UQ_users_email',
+      } as unknown as Error);
+      repository.update.mockRejectedValue(dbError);
+
+      await expect(
+        usersService.updateById('user-id', { email: 'taken@jake.jake' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('updates and returns the user on success', async () => {
+      repository.update.mockResolvedValue({ affected: 1 });
+      repository.findOne.mockResolvedValue({ id: 'user-id', bio: 'hi' });
+
+      const result = await usersService.updateById('user-id', { bio: 'hi' });
+
+      expect(repository.update).toHaveBeenCalledWith('user-id', { bio: 'hi' });
+      expect(result).toEqual({ id: 'user-id', bio: 'hi' });
     });
   });
 

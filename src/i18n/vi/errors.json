@@ -3,5 +3,10 @@
   "invalidCredentials": "Sai email hoặc mật khẩu",
   "tokenRevoked": "Token đã bị vô hiệu hoá",
   "userNotFound": "Không tìm thấy người dùng",
-  "usernameOrEmailAlreadyRegistered": "Username hoặc email đã được đăng ký"
+  "usernameOrEmailAlreadyRegistered": "Username hoặc email đã được đăng ký",
+  "attachmentNotFound": "Không tìm thấy tệp",
+  "usernameAlreadyTaken": "Username đã được sử dụng",
+  "alreadyFollowing": "Bạn đã theo dõi người này rồi",
+  "notFollowing": "Bạn chưa theo dõi người này",
+  "cannotFollowSelf": "Bạn không thể tự theo dõi mình"
 }
