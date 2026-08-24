@@ -28,6 +28,7 @@ export class AuthController {
   }
 
   @Post('users/login')
+  @HttpCode(200)
   login(@Body() dto: LoginDto): Promise<UserResponseDto> {
     return this.authService.login(dto);
   }
