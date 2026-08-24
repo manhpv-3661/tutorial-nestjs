@@ -31,17 +31,20 @@ import { RedisModule } from './redis/redis.module';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        ...config.get<DataSourceOptions>('typeorm')!,
+        ...config.getOrThrow<DataSourceOptions>('typeorm'),
         retryAttempts: 3,
         retryDelay: 1000,
       }),
     }),
-    I18nModule.forRoot({
-      fallbackLanguage: 'en',
-      loaderOptions: {
-        path: path.join(__dirname, '/i18n/'),
-        watch: process.env.NODE_ENV !== 'production',
-      },
+    I18nModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        fallbackLanguage: 'en',
+        loaderOptions: {
+          path: path.join(__dirname, '/i18n/'),
+          watch: config.getOrThrow<string>('NODE_ENV') !== 'production',
+        },
+      }),
       resolvers: [
         { use: QueryResolver, options: ['lang'] },
         new HeaderResolver(['x-lang']),

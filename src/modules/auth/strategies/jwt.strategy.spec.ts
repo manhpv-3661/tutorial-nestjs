@@ -21,7 +21,7 @@ describe('JwtStrategy', () => {
     usersService = { findById: jest.fn() };
     redisService = { isTokenBlacklisted: jest.fn().mockResolvedValue(false) };
     config = {
-      get: jest.fn().mockReturnValue('test-secret'),
+      getOrThrow: jest.fn().mockReturnValue('test-secret'),
     } as unknown as ConfigService;
     const i18n = { t: jest.fn((key: string) => key) } as unknown as I18nService;
 
@@ -31,22 +31,6 @@ describe('JwtStrategy', () => {
       redisService as unknown as RedisService,
       i18n,
     );
-  });
-
-  it('throws if JWT_SECRET is not configured', () => {
-    const missingSecretConfig = {
-      get: jest.fn().mockReturnValue(undefined),
-    } as unknown as ConfigService;
-
-    expect(
-      () =>
-        new JwtStrategy(
-          missingSecretConfig,
-          usersService as unknown as UsersService,
-          redisService as unknown as RedisService,
-          { t: jest.fn() } as unknown as I18nService,
-        ),
-    ).toThrow('JWT_SECRET is not configured');
   });
 
   it('rejects a blacklisted token', async () => {

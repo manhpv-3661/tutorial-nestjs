@@ -1,10 +1,10 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy, StrategyOptionsWithRequest } from 'passport-jwt';
+import { Strategy, StrategyOptionsWithRequest } from 'passport-jwt';
 import { Request } from 'express';
 import { I18nService } from 'nestjs-i18n';
-import { extractBearerToken } from '../../../common/utils/extract-bearer-token';
+import { extractBearerToken } from '../../../common/utils/extract-bearer-token.util';
 import { RedisService } from '../../../redis/redis.service';
 import { UsersService } from '../../users/users.service';
 
@@ -20,15 +20,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly redisService: RedisService,
     private readonly i18n: I18nService,
   ) {
-    const secret = config.get<string>('JWT_SECRET');
-    if (!secret) {
-      throw new Error('JWT_SECRET is not configured');
-    }
-
     const options: StrategyOptionsWithRequest = {
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: extractBearerToken,
       ignoreExpiration: false,
-      secretOrKey: secret,
+      secretOrKey: config.getOrThrow<string>('JWT_SECRET'),
       passReqToCallback: true,
     };
     super(options);
