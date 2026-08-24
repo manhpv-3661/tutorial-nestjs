@@ -10,19 +10,17 @@ describe('FollowsService', () => {
   let followsService: FollowsService;
   let repository: {
     findOne: jest.Mock;
-    create: jest.Mock;
-    save: jest.Mock;
+    insert: jest.Mock;
     delete: jest.Mock;
+    find: jest.Mock;
   };
 
   beforeEach(async () => {
     repository = {
       findOne: jest.fn(),
-      create: jest.fn(
-        (data: { followerId: string; followingId: string }) => data,
-      ),
-      save: jest.fn(),
+      insert: jest.fn(),
       delete: jest.fn(),
+      find: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -61,7 +59,7 @@ describe('FollowsService', () => {
       await expect(followsService.follow('a', 'a')).rejects.toBeInstanceOf(
         ConflictException,
       );
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.insert).not.toHaveBeenCalled();
     });
 
     it('throws ConflictException when already following', async () => {
@@ -73,38 +71,38 @@ describe('FollowsService', () => {
       await expect(followsService.follow('a', 'b')).rejects.toBeInstanceOf(
         ConflictException,
       );
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.insert).not.toHaveBeenCalled();
     });
 
-    it('saves a new follow row otherwise', async () => {
+    it('inserts a new follow row otherwise', async () => {
       repository.findOne.mockResolvedValue(null);
 
       await followsService.follow('a', 'b');
 
-      expect(repository.save).toHaveBeenCalledWith({
+      expect(repository.insert).toHaveBeenCalledWith({
         followerId: 'a',
         followingId: 'b',
       });
     });
 
-    it('maps a race-condition unique-violation on save to ConflictException', async () => {
+    it('maps a race-condition unique-violation on insert to ConflictException', async () => {
       repository.findOne.mockResolvedValue(null);
       const dbError = new QueryFailedError('INSERT ...', [], {
         code: '23505',
       } as unknown as Error);
-      repository.save.mockRejectedValue(dbError);
+      repository.insert.mockRejectedValue(dbError);
 
       await expect(followsService.follow('a', 'b')).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
 
-    it('rethrows any other database error from save unchanged', async () => {
+    it('rethrows any other database error from insert unchanged', async () => {
       repository.findOne.mockResolvedValue(null);
       const dbError = new QueryFailedError('INSERT ...', [], {
         code: '23502',
       } as unknown as Error);
-      repository.save.mockRejectedValue(dbError);
+      repository.insert.mockRejectedValue(dbError);
 
       await expect(followsService.follow('a', 'b')).rejects.toBe(dbError);
     });
@@ -123,6 +121,34 @@ describe('FollowsService', () => {
       repository.delete.mockResolvedValue({ affected: 1 });
 
       await expect(followsService.unfollow('a', 'b')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('getFollowingIds', () => {
+    it('returns an empty set without querying when given an empty target filter', async () => {
+      const result = await followsService.getFollowingIds('a', []);
+
+      expect(result).toEqual(new Set());
+      expect(repository.find).not.toHaveBeenCalled();
+    });
+
+    it('returns every followee when no target filter is given', async () => {
+      repository.find.mockResolvedValue([
+        { followingId: 'b' },
+        { followingId: 'c' },
+      ]);
+
+      const result = await followsService.getFollowingIds('a');
+
+      expect(result).toEqual(new Set(['b', 'c']));
+    });
+
+    it('returns only the followees present in the target filter', async () => {
+      repository.find.mockResolvedValue([{ followingId: 'b' }]);
+
+      const result = await followsService.getFollowingIds('a', ['b', 'c']);
+
+      expect(result).toEqual(new Set(['b']));
     });
   });
 });
