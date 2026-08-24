@@ -454,7 +454,33 @@ handleRequest<TUser = unknown>(err: unknown, user: TUser | false): TUser | null 
 
 ---
 
-## 17. Checklist trước khi tạo PR
+## 17. Core/Base — Line ending, format gate, và đọc env var
+
+**17.1 — Line ending: LF bắt buộc, cố định bằng `.gitattributes`.**
+
+**Vì sao:** Windows checkout với `core.autocrlf=true` tự convert LF → CRLF trên đĩa dù blob trong git vẫn là LF — gây `git add` liên tục cảnh báo "LF will be replaced by CRLF", và `prettier --check` (mặc định `endOfLine: "lf"`) fail trên chính những file không hề đổi nội dung, chỉ khác line ending do OS của người checkout.
+
+**Rule:** Repo có `.gitattributes` với `* text=auto eol=lf` — mọi file text luôn checkout ra LF bất kể OS. `.prettierrc` và `eslint.config.mjs` đều khai rõ `endOfLine: "lf"` (không dùng `"auto"`) để 2 công cụ đồng nhất, không cái nào tolerant hơn cái kia.
+
+**17.2 — CI phải chạy bản lint/format không tự sửa.**
+
+**Vì sao:** `npm run lint` (`eslint --fix`) tự sửa luôn lỗi format ngay trong bản checkout tạm của CI rồi mới báo kết quả — nghĩa là CI **không bao giờ thực sự chặn** được code format sai lọt vào repo, chỉ tự vá và pass, tạo cảm giác an toàn giả.
+
+**Rule:** Có 2 cặp script riêng biệt:
+- `npm run lint` / `npm run format` — có `--fix`/`--write`, dùng khi code cục bộ (dev tự sửa).
+- `npm run lint:check` / `npm run format:check` — không có `--fix`/`--write`, chỉ báo lỗi rồi exit non-zero. **CI (`ci.yml`) chỉ được dùng cặp `:check`**, không bao giờ dùng bản có `--fix`.
+
+**17.3 — Đọc env var: `ConfigService.getOrThrow()`, trừ `registerAs()` factory.**
+
+**Rule:** Env var đã khai trong `envValidationSchema` (Joi, `.required()` hoặc có `.default()`) thì đọc qua `ConfigService.getOrThrow<T>('KEY')` ở bất kỳ đâu có DI (controller, service, module factory nhận `ConfigService` qua `inject`) — không đọc thẳng `process.env`, không tự default/parse lại lần 2 (xem thêm mục 15).
+
+**Ngoại lệ hợp lệ — `registerAs()` factory (vd `typeorm.config.ts`):** factory này chạy trong `ConfigModule.forRoot({ load: [...] })`, **trước khi `ConfigService` tồn tại** (tránh vòng phụ thuộc: `ConfigService` chính là thứ tổng hợp kết quả của các factory này). Ở đây đọc thẳng `process.env` và tự parse (`Number(process.env.DB_PORT)`) là **đúng chuẩn NestJS**, không phải vi phạm rule trên — vì không có `ConfigService` nào để inject ở thời điểm này. Joi vẫn validate `process.env` gốc ở bước khác trong `ConfigModule.forRoot()`, nên vẫn an toàn.
+
+**Áp dụng:** trước khi viết `config.get('KEY')` hay `process.env.KEY`, tự hỏi: (1) đang ở trong `registerAs()` factory hay code có DI bình thường? (2) nếu có DI → `getOrThrow()`; nếu là `registerAs()` factory → `process.env` trực tiếp là chấp nhận được.
+
+---
+
+## 18. Checklist trước khi tạo PR
 
 - [ ] Controller không chứa business logic — chỉ gọi service.
 - [ ] Mỗi module đúng 1 domain, không lẫn nghiệp vụ khác; không có import vòng giữa module (mục 10).
@@ -469,5 +495,7 @@ handleRequest<TUser = unknown>(err: unknown, user: TUser | false): TUser | null 
 - [ ] Response thành công đi qua `XxxResponseDto.fromEntity()`, đúng envelope (mục 9).
 - [ ] Có unit test cho happy path + lỗi validate + edge case rỗng/null (mục 11).
 - [ ] Có e2e test nếu flow xuyên ≥2 module hoặc phụ thuộc DB constraint/transaction thật (mục 11).
+- [ ] Env var đọc qua `ConfigService.getOrThrow()`, trừ `registerAs()` factory (mục 17.3).
 - [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14.
+- [ ] Chạy `npm run lint:check` và `npm run format:check` (bản không `--fix`/`--write`) — đây là bản CI thật sự chạy, không phải `lint`/`format`.
 - [ ] Chạy `npm run build`, `npm test`, và `npm run test:e2e` — cả 3 đều pass.
