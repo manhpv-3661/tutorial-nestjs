@@ -4,14 +4,26 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { I18nValidationException } from 'nestjs-i18n';
 
-@Catch(HttpException)
-export class HttpExceptionFilter implements ExceptionFilter {
-  catch(exception: HttpException, host: ArgumentsHost) {
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
+
+    if (!(exception instanceof HttpException)) {
+      this.logger.error('Unhandled exception', exception);
+      response
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ errors: { body: ['Internal server error'] } });
+      return;
+    }
+
     const status = exception.getStatus();
     const body =
       exception instanceof I18nValidationException
