@@ -195,20 +195,55 @@ export function createAvatarInterceptor() {
 
 **Vì sao:** Mentor review: *"Chỗ này em dùng transaction để toàn vẹn dữ liệu trong trường hợp fails."*
 
+**CẢNH BÁO — lỗi dễ mắc nhất khi dùng `dataSource.transaction()`:** `dataSource.transaction(async (manager) => {...})` chỉ tạo ra 1 connection/transaction *có sẵn* trong tham số `manager` của callback. Nếu code bên trong callback gọi service khác mà service đó dùng `Repository` inject qua `@InjectRepository` (connection mặc định) thay vì `manager` được truyền vào, thì các câu lệnh đó **chạy ngoài transaction, tự commit ngay lập tức** — `transaction()` lúc này chỉ là cái vỏ rỗng, không rollback được gì. Đây là lỗi từng thực sự xảy ra trong repo này (`updateWithAvatar` gọi `attachmentsService.saveFile`/`deleteAllForOwner` không truyền `manager`) và bị 10 agent review độc lập phát hiện cùng lúc.
+
+**Sai (transaction rỗng — nhìn giống đúng nhưng không atomic):**
 ```typescript
-async updateWithAvatar(userId: string, data: UpdateUserData, avatar?: AvatarFile): Promise<User> {
-  return this.dataSource.transaction(async () => {
+async updateWithAvatar(userId: string, dto: UpdateUserDto, avatar?: Express.Multer.File): Promise<User> {
+  const data = await this.buildUpdateData(dto);
+  return this.dataSource.transaction(async () => {          // (manager) không được khai báo/dùng
     if (avatar) {
-      await this.attachmentsService.deleteAllForOwner(AttachmentOwnerType.USER_AVATAR, userId);
-      const attachment = await this.attachmentsService.saveFile(AttachmentOwnerType.USER_AVATAR, userId, avatar);
+      await this.attachmentsService.deleteAllForOwner(AttachmentOwnerType.USER_AVATAR, userId); // chạy trên connection mặc định
+      const attachment = await this.attachmentsService.saveFile(AttachmentOwnerType.USER_AVATAR, userId, avatar); // tự commit ngay
       data.image = `/attachments/${attachment.id}`;
     }
-    return this.updateById(userId, data);
+    return this.updateById(userId, data); // usersRepository cũng dùng connection mặc định — không rollback được
   });
 }
 ```
+Nếu `updateById` fail (vd trùng username) sau khi avatar đã đổi: file/row avatar mới đã **commit thật**, avatar cũ đã bị xóa thật — không gì rollback lại được, dù code "trông có transaction".
 
-**Lưu ý theo mentor:** xóa row attachment trong DB là bắt buộc trong transaction; xóa **file vật lý trên đĩa có thể để lại**, dọn dẹp sau bằng cron job hàng tháng — không cần chặn transaction chính vì thao tác I/O đĩa không rollback được.
+**Đúng (truyền `manager` xuyên suốt mọi Repository call bên trong transaction):**
+```typescript
+// users.service.ts
+async updateWithAvatar(userId: string, dto: UpdateUserDto, avatar?: Express.Multer.File): Promise<User> {
+  const data = await this.buildUpdateData(dto);
+  return this.dataSource.transaction(async (manager) => {   // lấy đúng EntityManager của transaction
+    if (avatar) {
+      await this.attachmentsService.deleteAllForOwner(AttachmentOwnerType.USER_AVATAR, userId, manager);
+      const attachment = await this.attachmentsService.saveFile(AttachmentOwnerType.USER_AVATAR, userId, avatar, manager);
+      data.image = `/attachments/${attachment.id}`;
+    }
+    return this.updateById(userId, data, manager);           // truyền tiếp xuống updateById
+  });
+}
+
+async updateById(id: string, data: UpdateUserData, manager?: EntityManager): Promise<User> {
+  const repository = manager ? manager.getRepository(User) : this.usersRepository;
+  // ... dùng `repository` thay vì `this.usersRepository` từ đây trở xuống
+}
+```
+```typescript
+// attachments.service.ts — method của service khác được gọi bên trong transaction cũng phải nhận & dùng manager
+async saveFile(ownerType: AttachmentOwnerType, ownerId: string, file: Express.Multer.File, manager?: EntityManager): Promise<Attachment> {
+  const repository = manager ? manager.getRepository(Attachment) : this.attachmentsRepository;
+  // ...
+}
+```
+
+**Áp dụng:** bất kỳ method nào có thể được gọi *bên trong* một `dataSource.transaction()` của service khác đều phải nhận thêm tham số `manager?: EntityManager` tuỳ chọn, và tự chọn `manager.getRepository(Entity)` thay vì Repository đã inject khi `manager` được truyền vào. Test phải mock `DataSource.transaction` trả về một `manager` giả có `getRepository` (không phải `undefined`), và assert rằng `manager` đó thực sự được truyền xuống các service con — nếu không, test vẫn xanh dù transaction bị rỗng như ví dụ Sai ở trên (xem `users.service.spec.ts`, test `updateWithAvatar` và `test/users.e2e-spec.ts` test *"rolls back the avatar swap when the rest of the update fails"* — test e2e này insert thật vào Postgres và assert đúng row nào sống sót sau rollback, phát hiện được lỗi mà test unit mock không thể).
+
+**Lưu ý theo mentor:** xóa row attachment trong DB là bắt buộc trong transaction; xóa **file vật lý trên đĩa có thể để lại**, dọn dẹp sau bằng cron job hàng tháng — không cần chặn transaction chính vì thao tác I/O đĩa không rollback được (transaction DB chỉ bảo vệ được các bảng, không bảo vệ được filesystem).
 
 ---
 
@@ -362,7 +397,7 @@ Sunlint là **heuristic**, một số cảnh báo không phản ánh đúng th�
 
 | Rule | Cảnh báo | Vì sao chấp nhận |
 |---|---|---|
-| `C033` | *"Service vừa dùng Repository vừa dùng DataSource — pattern không nhất quán"* | `UsersService` dùng `Repository` cho query đơn, và `DataSource.transaction()` khi cần ghi nhiều bảng trong 1 transaction (avatar + user). Đây là pattern chuẩn của TypeORM cho transaction, không phải lỗi kiến trúc. |
+| `C033` | *"Service vừa dùng Repository vừa dùng DataSource — pattern không nhất quán"*, và *"method gọi trực tiếp `manager.getRepository()`"* | `UsersService`/`AttachmentsService` dùng `Repository` inject cho query đơn, và `manager.getRepository(Entity)` bên trong `dataSource.transaction()` khi cần ghi nhiều bảng atomic trong 1 transaction (xem mục 6). `manager.getRepository()` là cách chuẩn của TypeORM để lấy Repository *đúng transaction đang chạy* — không dùng nó thì transaction rỗng (bug thật đã xảy ra, xem mục 6). Không phải lỗi kiến trúc. |
 | `C030` | *"Dùng custom error class thay vì throw Error thường"* trong `jwt.strategy.ts` | `throw new Error('JWT_SECRET is not configured')` xảy ra ở **thời điểm boot app** (constructor strategy), trước khi request pipeline và `HttpExceptionFilter` tồn tại — mục đích là crash sớm (fail-fast) nếu thiếu env, không phải response trả về client. |
 | `S037`, `S041`, `S045`, `S025` (một số vị trí) | Thiếu anti-cache header / brute-force protection / v.v. | Đã note trong PR#3: *"style/logging suggestions, not required to fix"* — đây là gợi ý bảo mật tổng quát cho tương lai (rate limiting, cache header), không phải lỗi chặn merge của pull hiện tại. Cân nhắc làm ở pull riêng về hardening. |
 
@@ -370,17 +405,69 @@ Sunlint là **heuristic**, một số cảnh báo không phản ánh đúng th�
 
 ---
 
-## 15. Checklist trước khi tạo PR
+## 15. Ưu tiên tái sử dụng của thư viện/codebase — hạn chế tự tạo lại
+
+**Rule:** Trước khi tự định nghĩa type/interface/constant mới, kiểm tra xem (1) framework/thư viện đang dùng (NestJS, Express, Multer, TypeORM, class-validator...) đã có sẵn chưa, và (2) chính codebase đã có DTO/interface/class nào mô tả đúng shape đó chưa. Chỉ tự tạo mới khi cả hai đều không có ("thiếu mới tạo mới").
+
+**Vì sao:** tự định nghĩa lại một type/constant đã có sẵn tạo ra nhiều nguồn sự thật (source of truth) cho cùng một khái niệm — thư viện hoặc DTO gốc đổi shape thì bản tự chế không tự động cập nhật theo, lệch nhau âm thầm mà compiler không báo được vì cả hai đều là type hợp lệ riêng biệt.
+
+**Ví dụ đã sửa trong repo:**
+
+| Trước (tự tạo, dư thừa) | Sau (tái sử dụng) | Lý do |
+|---|---|---|
+| `interface AvatarFile { originalname; mimetype; size; buffer }` tự viết trong `users/interfaces/`, và một object type inline y hệt trong `attachments.service.ts` | `Express.Multer.File` (từ `@types/multer`, đã sẵn trong devDependencies) | Multer đã định nghĩa đúng type file upload; tự viết lại vừa dư thừa vừa thiếu field so với thật (`fieldname`, `encoding`, `stream`...) — lỡ dùng field đó ở đâu là lộ ra sai lệch. |
+| `@HttpCode(200)`, `@HttpCode(204)` (số ma thuật) | `@HttpCode(HttpStatus.OK)`, `@HttpCode(HttpStatus.NO_CONTENT)` | `HttpStatus` enum có sẵn trong `@nestjs/common` — đọc rõ nghĩa hơn số thuần, tránh gõ nhầm mã trạng thái. |
+| `res.setHeader('Content-Type', ...)` + `res.sendFile()` qua `@Res()` thô trong `AttachmentsController` | `StreamableFile` (built-in Nest) với option `type` | Nest đã có sẵn kiểu trả về cho file streaming, tự quản lý response lifecycle (exception filter/interceptor vẫn hoạt động), không cần thoát ra `@Res()` không kiểm soát. |
+| Interface `UserEnvelope`/`ProfileEnvelope` tự khai trong `test/utils/` chỉ để ép kiểu `res.body` | Import thẳng `UserResponseDto`/`ProfileResponseDto` từ `src/modules/.../dto/` | DTO thật đã tồn tại trong `src` — khai lại một interface song song chỉ để test là duplicate; DTO đổi field mà quên sửa test thì test vẫn "xanh" giả. |
+| `const SALT_ROUNDS = 10` khai riêng trong `auth.service.ts`, trùng với `SALT_ROUNDS` đã export ở `users/constants/users.constants.ts` | Import `SALT_ROUNDS` từ `users.constants.ts` | 2 module cùng hash password nhưng dùng 2 hằng số độc lập — đổi cost factor ở 1 chỗ, chỗ kia âm thầm lệch, không compile error nào báo. |
+| `POSTGRES_UNIQUE_VIOLATION = '23505'` + logic map lỗi unique-violation khai riêng ở cả `users.service.ts` và `follows.service.ts` | `src/common/utils/postgres-unique-violation.util.ts` export `isUniqueViolation()`/`getViolatedConstraint()`, cả 2 service cùng import | Cùng 1 khái niệm ("đây có phải lỗi trùng khoá không") bị cài đặt lại y hệt ở 2 nơi — sửa 1 chỗ (vd đổi driver DB, thêm constraint mới) rất dễ quên chỗ còn lại. |
+| `expiresIn: Number(config.get('JWT_EXPIRES_IN')) \|\| 86400` và `process.env.PORT ?? 3000` tự default lại giá trị mà `Joi` schema (`env.validation.ts`) đã default sẵn | `config.getOrThrow<number>('JWT_EXPIRES_IN')`, `configService.getOrThrow<number>('PORT')` | Joi là nguồn sự thật duy nhất cho default/validate env var; tự default thêm lần 2 vừa dư thừa vừa có bug thật (`value \|\| default` biến `0` hợp lệ thành default sai) khi giá trị đúng lại là falsy. |
+
+**Áp dụng:** trước khi viết `interface`/`type`/`const` mới, tự hỏi theo đúng thứ tự: thư viện đang dùng có sẵn chưa → codebase đã có DTO/interface nào mô tả đúng shape này chưa → chỉ khi cả hai đều không có mới tự định nghĩa. Với biến môi trường: nếu đã khai trong `envValidationSchema` (Joi), luôn đọc qua `ConfigService.getOrThrow()` — không đọc thẳng `process.env` và không tự default thêm lần 2.
+
+---
+
+## 16. Guard — Optional Auth phải fail-closed với lỗi thật, chỉ fail-open khi không có credential
+
+**Rule:** Guard override `handleRequest(err, user, info)` cho route auth-optional (vd `OptionalJwtAuthGuard`) chỉ được coi là "anonymous" (trả `null`, không chặn request) khi **không có lỗi** (`err` rỗng — nghĩa là chỉ đơn giản không gửi token). Nếu `err` có giá trị (token sai định dạng do chính `validate()` throw, token bị revoke/blacklist, user trong token đã bị xoá...) thì phải rethrow, không được nuốt.
+
+**Vì sao:** Bug thật đã xảy ra trong repo — `OptionalJwtAuthGuard.handleRequest(_err, user)` bỏ qua hẳn tham số lỗi và `return user || null`. Hậu quả: user vừa logout (token đã bị `RedisService` blacklist) gọi `GET /profiles/:username` (route auth-optional) — `JwtStrategy.validate()` throw `UnauthorizedException('tokenRevoked')` đúng như thiết kế, nhưng guard nuốt mất lỗi này và coi request là anonymous — trả về 200 thay vì báo token đã bị revoke. Cùng lỗi này cũng che giấu luôn trường hợp hạ tầng thật sự hỏng (Redis down khi check blacklist ném lỗi không mong muốn) thành "chỉ là chưa đăng nhập".
+
+**Sai:**
+```typescript
+handleRequest<TUser = unknown>(_err: unknown, user: TUser | false): TUser | null {
+  return user || null;   // nuốt mọi lỗi, kể cả lỗi thật
+}
+```
+
+**Đúng:**
+```typescript
+handleRequest<TUser = unknown>(err: unknown, user: TUser | false): TUser | null {
+  if (err) {
+    throw err as Error;   // token sai/bị revoke → vẫn phải báo lỗi, không hạ xuống anonymous
+  }
+  return user || null;    // chỉ trường hợp không gửi token mới coi là anonymous
+}
+```
+
+**Áp dụng:** mọi guard override `handleRequest` cho auth-optional phải có test riêng (`*.guard.spec.ts`) phủ đúng 3 case: không có token → `null`; có token hợp lệ → trả `user`; có token nhưng bị strategy từ chối (lỗi) → rethrow, không nuốt. Xem `src/modules/auth/guards/optional-jwt-auth.guard.spec.ts`.
+
+---
+
+## 17. Checklist trước khi tạo PR
 
 - [ ] Controller không chứa business logic — chỉ gọi service.
 - [ ] Mỗi module đúng 1 domain, không lẫn nghiệp vụ khác; không có import vòng giữa module (mục 10).
 - [ ] `{feature}.controller.ts`/`.service.ts`/`.module.ts` phẳng ở root module; `dto/`, `entities/`, `guards/`, `constants/`, `interfaces/`... đúng subfolder theo vai trò (mục 2).
 - [ ] Không còn inline object type lặp lại — đã tách `interface`.
-- [ ] Có transaction cho thao tác ghi nhiều bảng.
+- [ ] Không tự định nghĩa lại type/constant mà thư viện hoặc codebase đã có sẵn; env var đã có trong Joi schema thì đọc qua `ConfigService.getOrThrow()`, không tự default lại (mục 15).
+- [ ] Có transaction cho thao tác ghi nhiều bảng — **và mọi Repository call bên trong callback thực sự dùng `manager` được truyền vào**, không phải Repository inject mặc định (mục 6). Nếu transaction gọi sang service khác, method đó phải nhận `manager?: EntityManager` và dùng nó.
 - [ ] Guard input rỗng trước khi update DB.
-- [ ] Bắt lỗi unique violation → trả `ConflictException` với message đúng field.
+- [ ] Bắt lỗi unique violation → trả `ConflictException` với message đúng field (dùng chung `isUniqueViolation()`/`getViolatedConstraint()` ở `common/utils`, không tự viết lại check `error.driverError.code`).
 - [ ] Upload file có `fileFilter` allow-list MIME type.
+- [ ] Guard auth-optional (override `handleRequest`) chỉ fail-open khi không có lỗi; có lỗi thật (token revoke, strategy throw...) phải rethrow (mục 16).
 - [ ] Response thành công đi qua `XxxResponseDto.fromEntity()`, đúng envelope (mục 9).
 - [ ] Có unit test cho happy path + lỗi validate + edge case rỗng/null (mục 11).
+- [ ] Có e2e test nếu flow xuyên ≥2 module hoặc phụ thuộc DB constraint/transaction thật (mục 11).
 - [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14.
-- [ ] Chạy `npm run build` và `npm test` — pass.
+- [ ] Chạy `npm run build`, `npm test`, và `npm run test:e2e` — cả 3 đều pass.
