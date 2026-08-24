@@ -2,7 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import request from 'supertest';
 import type { App } from 'supertest/types';
-import { UserEnvelope } from './response-types';
+import { UserResponseDto } from '../../src/modules/users/dto/user-response.dto';
 
 export interface RegisteredUser {
   username: string;
@@ -24,6 +24,6 @@ export async function registerUser(
     .send({ username, email, password })
     .expect(201);
 
-  const body = res.body as UserEnvelope;
+  const body = res.body as UserResponseDto;
   return { username, email, password, token: body.user.token };
 }

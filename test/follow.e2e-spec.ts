@@ -3,7 +3,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { createTestApp } from './utils/create-test-app';
 import { registerUser } from './utils/register-user';
-import { ProfileEnvelope } from './utils/response-types';
+import { ProfileResponseDto } from '../src/modules/profiles/dto/profile-response.dto';
 
 describe('Follow flow (e2e)', () => {
   let app: INestApplication<App>;
@@ -23,7 +23,7 @@ describe('Follow flow (e2e)', () => {
       .get(`/profiles/${target.username}`)
       .expect(200);
 
-    const body = res.body as ProfileEnvelope;
+    const body = res.body as ProfileResponseDto;
     expect(body.profile).toMatchObject({
       username: target.username,
       following: false,
@@ -52,7 +52,7 @@ describe('Follow flow (e2e)', () => {
       .post(`/profiles/${target.username}/follow`)
       .set('Authorization', `Bearer ${follower.token}`)
       .expect(201);
-    expect((followRes.body as ProfileEnvelope).profile).toMatchObject({
+    expect((followRes.body as ProfileResponseDto).profile).toMatchObject({
       username: target.username,
       following: true,
     });
@@ -61,15 +61,15 @@ describe('Follow flow (e2e)', () => {
       .get(`/profiles/${target.username}`)
       .set('Authorization', `Bearer ${follower.token}`)
       .expect(200);
-    expect((profileAfterFollow.body as ProfileEnvelope).profile.following).toBe(
-      true,
-    );
+    expect(
+      (profileAfterFollow.body as ProfileResponseDto).profile.following,
+    ).toBe(true);
 
     const unfollowRes = await request(app.getHttpServer())
       .delete(`/profiles/${target.username}/follow`)
       .set('Authorization', `Bearer ${follower.token}`)
       .expect(200);
-    expect((unfollowRes.body as ProfileEnvelope).profile).toMatchObject({
+    expect((unfollowRes.body as ProfileResponseDto).profile).toMatchObject({
       username: target.username,
       following: false,
     });
@@ -79,7 +79,7 @@ describe('Follow flow (e2e)', () => {
       .set('Authorization', `Bearer ${follower.token}`)
       .expect(200);
     expect(
-      (profileAfterUnfollow.body as ProfileEnvelope).profile.following,
+      (profileAfterUnfollow.body as ProfileResponseDto).profile.following,
     ).toBe(false);
   });
 

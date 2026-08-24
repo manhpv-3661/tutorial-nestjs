@@ -4,7 +4,8 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { createTestApp } from './utils/create-test-app';
 import { registerUser } from './utils/register-user';
-import { ErrorEnvelope, UserEnvelope } from './utils/response-types';
+import { ErrorEnvelope } from './utils/response-types';
+import { UserResponseDto } from '../src/modules/users/dto/user-response.dto';
 
 describe('Auth flow (e2e)', () => {
   let app: INestApplication<App>;
@@ -27,7 +28,7 @@ describe('Auth flow (e2e)', () => {
       .send({ username, email, password: 'password123' })
       .expect(201);
 
-    const body = res.body as UserEnvelope;
+    const body = res.body as UserResponseDto;
     expect(body.user).toMatchObject({ username, email });
     expect(typeof body.user.token).toBe('string');
     expect(body.user.token.length).toBeGreaterThan(0);
@@ -64,7 +65,7 @@ describe('Auth flow (e2e)', () => {
       .send({ email: user.email, password: user.password })
       .expect(200);
 
-    const body = res.body as UserEnvelope;
+    const body = res.body as UserResponseDto;
     expect(body.user).toMatchObject({
       username: user.username,
       email: user.email,
@@ -99,7 +100,7 @@ describe('Auth flow (e2e)', () => {
       .set('Authorization', `Bearer ${user.token}`)
       .expect(200);
 
-    const body = res.body as UserEnvelope;
+    const body = res.body as UserResponseDto;
     expect(body.user).toMatchObject({
       username: user.username,
       email: user.email,
