@@ -2,7 +2,8 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
-import { QueryFailedError } from 'typeorm';
+import { QueryFailedError, DataSource } from 'typeorm';
+import { AttachmentsService } from '../attachments/attachments.service';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 
@@ -36,6 +37,22 @@ describe('UsersService', () => {
         {
           provide: I18nService,
           useValue: { t: jest.fn((key: string) => key) },
+        },
+        {
+          provide: AttachmentsService,
+          useValue: { deleteAllForOwner: jest.fn(), saveFile: jest.fn() },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            createQueryRunner: jest.fn(() => ({
+              connect: jest.fn(),
+              startTransaction: jest.fn(),
+              commitTransaction: jest.fn(),
+              rollbackTransaction: jest.fn(),
+              release: jest.fn(),
+            })),
+          },
         },
       ],
     }).compile();

@@ -5,7 +5,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { I18nService } from 'nestjs-i18n';
-import { QueryFailedError, Repository } from 'typeorm';
+import { QueryFailedError, Repository, DataSource } from 'typeorm';
+import { AttachmentOwnerType } from '../attachments/entities/attachment.entity';
+import { AttachmentsService } from '../attachments/attachments.service';
 import { User } from './entities/user.entity';
 
 const POSTGRES_UNIQUE_VIOLATION = '23505';
@@ -15,6 +17,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User) private readonly usersRepository: Repository<User>,
     private readonly i18n: I18nService,
+    private readonly attachmentsService: AttachmentsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   findByEmail(email: string): Promise<User | null> {
@@ -65,6 +69,51 @@ export class UsersService {
       throw new NotFoundException(this.i18n.t('errors.userNotFound'));
     }
     return user;
+  }
+
+  async updateWithAvatar(
+    userId: string,
+    data: Partial<{
+      username: string;
+      email: string;
+      password: string;
+      bio: string;
+      image: string;
+    }>,
+    avatar?: {
+      originalname: string;
+      mimetype: string;
+      size: number;
+      buffer: Buffer;
+    },
+  ): Promise<User> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      if (avatar) {
+        await this.attachmentsService.deleteAllForOwner(
+          AttachmentOwnerType.USER_AVATAR,
+          userId,
+        );
+        const attachment = await this.attachmentsService.saveFile(
+          AttachmentOwnerType.USER_AVATAR,
+          userId,
+          avatar,
+        );
+        data.image = `/attachments/${attachment.id}`;
+      }
+
+      const updated = await this.updateById(userId, data);
+      await queryRunner.commitTransaction();
+      return updated;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   private toConflictOrRethrow(error: unknown): unknown {

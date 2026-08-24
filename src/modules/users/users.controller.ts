@@ -9,11 +9,9 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import * as bcrypt from 'bcrypt';
 import type { Request } from 'express';
-import { AttachmentOwnerType } from '../attachments/entities/attachment.entity';
-import { AttachmentsService } from '../attachments/attachments.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,21 +19,36 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 
+interface AvatarFile {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
 const SALT_ROUNDS = 10;
 const ALLOWED_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const UPDATE_USER_SCHEMA = {
+  type: 'object',
+  properties: {
+    username: { type: 'string' },
+    email: { type: 'string' },
+    password: { type: 'string' },
+    bio: { type: 'string' },
+    avatar: { type: 'string', format: 'binary' },
+  },
+};
 
 @ApiTags('user')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('user')
 export class UsersController {
-  constructor(
-    private readonly usersService: UsersService,
-    private readonly attachmentsService: AttachmentsService,
-  ) {}
+  constructor(private readonly usersService: UsersService) {}
 
   @Put()
   @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: UPDATE_USER_SCHEMA })
   @UseInterceptors(
     FileInterceptor('avatar', {
       limits: { fileSize: 10 * 1024 * 1024 },
@@ -56,15 +69,7 @@ export class UsersController {
   async updateCurrentUser(
     @CurrentUser() currentUser: User,
     @Body() dto: UpdateUserDto,
-    @UploadedFile()
-    avatar:
-      | {
-          originalname: string;
-          mimetype: string;
-          size: number;
-          buffer: Buffer;
-        }
-      | undefined,
+    @UploadedFile() avatar: AvatarFile | undefined,
     @Req() req: Request & { token?: string },
   ): Promise<UserResponseDto> {
     const data: Partial<{
@@ -82,20 +87,11 @@ export class UsersController {
       data.password = await bcrypt.hash(dto.password, SALT_ROUNDS);
     }
 
-    if (avatar) {
-      await this.attachmentsService.deleteAllForOwner(
-        AttachmentOwnerType.USER_AVATAR,
-        currentUser.id,
-      );
-      const attachment = await this.attachmentsService.saveFile(
-        AttachmentOwnerType.USER_AVATAR,
-        currentUser.id,
-        avatar,
-      );
-      data.image = `/attachments/${attachment.id}`;
-    }
-
-    const updated = await this.usersService.updateById(currentUser.id, data);
+    const updated = await this.usersService.updateWithAvatar(
+      currentUser.id,
+      data,
+      avatar,
+    );
     return UserResponseDto.fromEntity(updated, req.token ?? '');
   }
 }
