@@ -40,7 +40,7 @@ import { RedisModule } from './redis/redis.module';
       fallbackLanguage: 'en',
       loaderOptions: {
         path: path.join(__dirname, '/i18n/'),
-        watch: true,
+        watch: process.env.NODE_ENV !== 'production',
       },
       resolvers: [
         { use: QueryResolver, options: ['lang'] },
