@@ -15,6 +15,9 @@ import { envValidationSchema } from './config/env.validation';
 import { typeormConfig } from './config/typeorm.config';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
+import { ProfilesModule } from './modules/profiles/profiles.module';
+import { FollowsModule } from './modules/follows/follows.module';
+import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { RedisModule } from './redis/redis.module';
 
 @Module({
@@ -46,8 +49,11 @@ import { RedisModule } from './redis/redis.module';
       ],
     }),
     RedisModule,
-    UsersModule,
     AuthModule,
+    UsersModule,
+    FollowsModule,
+    ProfilesModule,
+    AttachmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

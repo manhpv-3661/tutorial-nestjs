@@ -1,5 +1,7 @@
 export const SALT_ROUNDS = 10;
 
+export const MAX_AVATAR_SIZE = 10 * 1024 * 1024;
+
 export const ALLOWED_AVATAR_MIME_TYPES = [
   'image/jpeg',
   'image/png',

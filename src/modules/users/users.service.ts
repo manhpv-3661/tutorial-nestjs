@@ -4,13 +4,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as bcrypt from 'bcrypt';
 import { I18nService } from 'nestjs-i18n';
 import { QueryFailedError, Repository, DataSource } from 'typeorm';
 import { AttachmentOwnerType } from '../attachments/entities/attachment.entity';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { User } from './entities/user.entity';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { AvatarFile, UpdateUserData } from './interfaces';
+import { SALT_ROUNDS } from './constants/users.constants';
 
 const POSTGRES_UNIQUE_VIOLATION = '23505';
+const UNIQUE_CONSTRAINT_USERNAME = 'UQ_users_username';
+const UNIQUE_CONSTRAINT_EMAIL = 'UQ_users_email';
 
 @Injectable()
 export class UsersService {
@@ -33,6 +39,14 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { id } });
   }
 
+  async findByUsernameOrThrow(username: string): Promise<User> {
+    const user = await this.findByUsername(username);
+    if (!user) {
+      throw new NotFoundException(this.i18n.t('errors.userNotFound'));
+    }
+    return user;
+  }
+
   async create(data: {
     username: string;
     email: string;
@@ -46,16 +60,7 @@ export class UsersService {
     }
   }
 
-  async updateById(
-    id: string,
-    data: Partial<{
-      username: string;
-      email: string;
-      password: string;
-      bio: string;
-      image: string;
-    }>,
-  ): Promise<User> {
+  async updateById(id: string, data: UpdateUserData): Promise<User> {
     if (Object.keys(data).length > 0) {
       try {
         await this.usersRepository.update(id, data);
@@ -73,25 +78,12 @@ export class UsersService {
 
   async updateWithAvatar(
     userId: string,
-    data: Partial<{
-      username: string;
-      email: string;
-      password: string;
-      bio: string;
-      image: string;
-    }>,
-    avatar?: {
-      originalname: string;
-      mimetype: string;
-      size: number;
-      buffer: Buffer;
-    },
+    dto: UpdateUserDto,
+    avatar?: AvatarFile,
   ): Promise<User> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const data = await this.buildUpdateData(dto);
 
-    try {
+    return this.dataSource.transaction(async () => {
       if (avatar) {
         await this.attachmentsService.deleteAllForOwner(
           AttachmentOwnerType.USER_AVATAR,
@@ -105,15 +97,19 @@ export class UsersService {
         data.image = `/attachments/${attachment.id}`;
       }
 
-      const updated = await this.updateById(userId, data);
-      await queryRunner.commitTransaction();
-      return updated;
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
-    } finally {
-      await queryRunner.release();
+      return this.updateById(userId, data);
+    });
+  }
+
+  private async buildUpdateData(dto: UpdateUserDto): Promise<UpdateUserData> {
+    const data: UpdateUserData = {};
+    if (dto.username !== undefined) data.username = dto.username;
+    if (dto.email !== undefined) data.email = dto.email;
+    if (dto.bio !== undefined) data.bio = dto.bio;
+    if (dto.password !== undefined) {
+      data.password = await bcrypt.hash(dto.password, SALT_ROUNDS);
     }
+    return data;
   }
 
   private toConflictOrRethrow(error: unknown): unknown {
@@ -127,10 +123,10 @@ export class UsersService {
 
     const constraint = (error.driverError as { constraint?: string })
       ?.constraint;
-    if (constraint === 'UQ_users_username') {
+    if (constraint === UNIQUE_CONSTRAINT_USERNAME) {
       return new ConflictException(this.i18n.t('errors.usernameAlreadyTaken'));
     }
-    if (constraint === 'UQ_users_email') {
+    if (constraint === UNIQUE_CONSTRAINT_EMAIL) {
       return new ConflictException(
         this.i18n.t('errors.emailAlreadyRegistered'),
       );
