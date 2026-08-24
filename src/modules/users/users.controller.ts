@@ -18,26 +18,12 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
-
-interface AvatarFile {
-  originalname: string;
-  mimetype: string;
-  size: number;
-  buffer: Buffer;
-}
-
-const SALT_ROUNDS = 10;
-const ALLOWED_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const UPDATE_USER_SCHEMA = {
-  type: 'object',
-  properties: {
-    username: { type: 'string' },
-    email: { type: 'string' },
-    password: { type: 'string' },
-    bio: { type: 'string' },
-    avatar: { type: 'string', format: 'binary' },
-  },
-};
+import { AvatarFile } from './interfaces';
+import {
+  SALT_ROUNDS,
+  ALLOWED_AVATAR_MIME_TYPES,
+  UPDATE_USER_SCHEMA,
+} from './constants/users.constants';
 
 @ApiTags('user')
 @ApiBearerAuth()
