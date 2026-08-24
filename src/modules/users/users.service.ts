@@ -6,15 +6,18 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { I18nService } from 'nestjs-i18n';
-import { QueryFailedError, Repository, DataSource } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import {
+  getViolatedConstraint,
+  isUniqueViolation,
+} from '../../common/utils/postgres-unique-violation.util';
 import { AttachmentOwnerType } from '../attachments/entities/attachment.entity';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { AvatarFile, UpdateUserData } from './interfaces';
+import { CreateUserData, UpdateUserData } from './interfaces';
 import { SALT_ROUNDS } from './constants/users.constants';
 
-const POSTGRES_UNIQUE_VIOLATION = '23505';
 const UNIQUE_CONSTRAINT_USERNAME = 'UQ_users_username';
 const UNIQUE_CONSTRAINT_EMAIL = 'UQ_users_email';
 
@@ -47,11 +50,7 @@ export class UsersService {
     return user;
   }
 
-  async create(data: {
-    username: string;
-    email: string;
-    password: string;
-  }): Promise<User> {
+  async create(data: CreateUserData): Promise<User> {
     const user = this.usersRepository.create(data);
     try {
       return await this.usersRepository.save(user);
@@ -60,16 +59,24 @@ export class UsersService {
     }
   }
 
-  async updateById(id: string, data: UpdateUserData): Promise<User> {
+  async updateById(
+    id: string,
+    data: UpdateUserData,
+    manager?: EntityManager,
+  ): Promise<User> {
+    const repository = manager
+      ? manager.getRepository(User)
+      : this.usersRepository;
+
     if (Object.keys(data).length > 0) {
       try {
-        await this.usersRepository.update(id, data);
+        await repository.update(id, data);
       } catch (error) {
         throw this.toConflictOrRethrow(error);
       }
     }
 
-    const user = await this.findById(id);
+    const user = await repository.findOne({ where: { id } });
     if (!user) {
       throw new NotFoundException(this.i18n.t('errors.userNotFound'));
     }
@@ -79,25 +86,27 @@ export class UsersService {
   async updateWithAvatar(
     userId: string,
     dto: UpdateUserDto,
-    avatar?: AvatarFile,
+    avatar?: Express.Multer.File,
   ): Promise<User> {
     const data = await this.buildUpdateData(dto);
 
-    return this.dataSource.transaction(async () => {
+    return this.dataSource.transaction(async (manager) => {
       if (avatar) {
         await this.attachmentsService.deleteAllForOwner(
           AttachmentOwnerType.USER_AVATAR,
           userId,
+          manager,
         );
         const attachment = await this.attachmentsService.saveFile(
           AttachmentOwnerType.USER_AVATAR,
           userId,
           avatar,
+          manager,
         );
         data.image = `/attachments/${attachment.id}`;
       }
 
-      return this.updateById(userId, data);
+      return this.updateById(userId, data, manager);
     });
   }
 
@@ -113,16 +122,11 @@ export class UsersService {
   }
 
   private toConflictOrRethrow(error: unknown): unknown {
-    if (
-      !(error instanceof QueryFailedError) ||
-      (error.driverError as { code?: string })?.code !==
-        POSTGRES_UNIQUE_VIOLATION
-    ) {
+    if (!isUniqueViolation(error)) {
       return error;
     }
 
-    const constraint = (error.driverError as { constraint?: string })
-      ?.constraint;
+    const constraint = getViolatedConstraint(error);
     if (constraint === UNIQUE_CONSTRAINT_USERNAME) {
       return new ConflictException(this.i18n.t('errors.usernameAlreadyTaken'));
     }

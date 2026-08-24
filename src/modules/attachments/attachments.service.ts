@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import { I18nService } from 'nestjs-i18n';
 import * as path from 'path';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Attachment, AttachmentOwnerType } from './entities/attachment.entity';
 
 const STORAGE_ROOT = path.join(process.cwd(), 'storage', 'uploads');
@@ -20,12 +20,8 @@ export class AttachmentsService {
   async saveFile(
     ownerType: AttachmentOwnerType,
     ownerId: string,
-    file: {
-      originalname: string;
-      mimetype: string;
-      size: number;
-      buffer: Buffer;
-    },
+    file: Express.Multer.File,
+    manager?: EntityManager,
   ): Promise<Attachment> {
     await fs.mkdir(STORAGE_ROOT, { recursive: true });
 
@@ -33,8 +29,9 @@ export class AttachmentsService {
     const storedPath = path.join(STORAGE_ROOT, storedName);
     await fs.writeFile(storedPath, file.buffer);
 
-    return this.attachmentsRepository.save(
-      this.attachmentsRepository.create({
+    const repository = this.repositoryFor(manager);
+    return repository.save(
+      repository.create({
         ownerType,
         ownerId,
         fileName: file.originalname,
@@ -58,16 +55,26 @@ export class AttachmentsService {
   async deleteAllForOwner(
     ownerType: AttachmentOwnerType,
     ownerId: string,
+    manager?: EntityManager,
   ): Promise<void> {
-    const attachments = await this.attachmentsRepository.find({
+    const repository = this.repositoryFor(manager);
+    const attachments = await repository.find({
       where: { ownerType, ownerId },
     });
 
-    for (const attachment of attachments) {
-      await fs.unlink(attachment.path).catch(() => undefined);
-    }
+    await Promise.all(
+      attachments.map((attachment) =>
+        fs.unlink(attachment.path).catch(() => undefined),
+      ),
+    );
     if (attachments.length > 0) {
-      await this.attachmentsRepository.remove(attachments);
+      await repository.remove(attachments);
     }
+  }
+
+  private repositoryFor(manager?: EntityManager): Repository<Attachment> {
+    return manager
+      ? manager.getRepository(Attachment)
+      : this.attachmentsRepository;
   }
 }

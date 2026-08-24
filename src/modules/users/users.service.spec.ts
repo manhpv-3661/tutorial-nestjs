@@ -2,23 +2,18 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
-import { QueryFailedError, DataSource } from 'typeorm';
+import { QueryFailedError, DataSource, EntityManager } from 'typeorm';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AttachmentOwnerType } from '../attachments/entities/attachment.entity';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateUserData } from './interfaces';
 
 describe('UsersService', () => {
-  type CreateUserInput = {
-    username: string;
-    email: string;
-    password: string;
-  };
-
   let usersService: UsersService;
   let repository: {
-    create: jest.Mock<CreateUserInput, [CreateUserInput]>;
+    create: jest.Mock<CreateUserData, [CreateUserData]>;
     save: jest.Mock;
     findOne: jest.Mock;
     update: jest.Mock;
@@ -27,10 +22,11 @@ describe('UsersService', () => {
     deleteAllForOwner: jest.Mock;
     saveFile: jest.Mock;
   };
+  let fakeManager: EntityManager;
 
   beforeEach(async () => {
     repository = {
-      create: jest.fn((data: CreateUserInput) => data),
+      create: jest.fn((data: CreateUserData) => data),
       save: jest.fn(),
       findOne: jest.fn(),
       update: jest.fn(),
@@ -39,6 +35,9 @@ describe('UsersService', () => {
       deleteAllForOwner: jest.fn(),
       saveFile: jest.fn(),
     };
+    fakeManager = {
+      getRepository: jest.fn(() => repository),
+    } as unknown as EntityManager;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -52,8 +51,8 @@ describe('UsersService', () => {
         {
           provide: DataSource,
           useValue: {
-            transaction: jest.fn((work: (manager: unknown) => unknown) =>
-              work(undefined),
+            transaction: jest.fn((work: (manager: EntityManager) => unknown) =>
+              work(fakeManager),
             ),
           },
         },
@@ -210,7 +209,7 @@ describe('UsersService', () => {
         mimetype: 'image/png',
         size: 100,
         buffer: Buffer.from('fake'),
-      };
+      } as Express.Multer.File;
       attachmentsService.saveFile.mockResolvedValue({ id: 'attachment-id' });
       repository.update.mockResolvedValue({ affected: 1 });
       repository.findOne.mockResolvedValue({
@@ -223,11 +222,13 @@ describe('UsersService', () => {
       expect(attachmentsService.deleteAllForOwner).toHaveBeenCalledWith(
         AttachmentOwnerType.USER_AVATAR,
         'user-id',
+        fakeManager,
       );
       expect(attachmentsService.saveFile).toHaveBeenCalledWith(
         AttachmentOwnerType.USER_AVATAR,
         'user-id',
         avatar,
+        fakeManager,
       );
       expect(repository.update).toHaveBeenCalledWith('user-id', {
         image: '/attachments/attachment-id',
