@@ -50,7 +50,7 @@ describe('UsersController', () => {
       mimetype: 'image/png',
       size: 10,
       buffer: Buffer.from('x'),
-    };
+    } as Express.Multer.File;
 
     await controller.updateCurrentUser(currentUser, {}, avatar, req);
 

@@ -8,12 +8,11 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../../redis/redis.service';
+import { SALT_ROUNDS } from '../users/constants/users.constants';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-
-const SALT_ROUNDS = 10;
 
 @Injectable()
 export class AuthService {

@@ -5,10 +5,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { I18nService } from 'nestjs-i18n';
-import { QueryFailedError, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { isUniqueViolation } from '../../common/utils/postgres-unique-violation.util';
 import { Follow } from './entities/follow.entity';
-
-const POSTGRES_UNIQUE_VIOLATION = '23505';
 
 @Injectable()
 export class FollowsService {
@@ -40,11 +39,7 @@ export class FollowsService {
         this.followsRepository.create({ followerId, followingId }),
       );
     } catch (error) {
-      if (
-        error instanceof QueryFailedError &&
-        (error.driverError as { code?: string })?.code ===
-          POSTGRES_UNIQUE_VIOLATION
-      ) {
+      if (isUniqueViolation(error)) {
         throw new ConflictException(this.i18n.t('errors.alreadyFollowing'));
       }
       throw error;

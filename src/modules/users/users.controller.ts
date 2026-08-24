@@ -15,7 +15,6 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
-import { AvatarFile } from './interfaces';
 import { UPDATE_USER_SCHEMA } from './constants/users.constants';
 import { createAvatarUploadInterceptor } from './interceptors/avatar-upload.interceptor';
 
@@ -33,7 +32,7 @@ export class UsersController {
   async updateCurrentUser(
     @CurrentUser() currentUser: User,
     @Body() dto: UpdateUserDto,
-    @UploadedFile() avatar: AvatarFile | undefined,
+    @UploadedFile() avatar: Express.Multer.File | undefined,
     @Req() req: Request & { token?: string },
   ): Promise<UserResponseDto> {
     const updated = await this.usersService.updateWithAvatar(

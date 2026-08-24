@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  HttpStatus,
   Post,
   Req,
   UseGuards,
@@ -28,7 +29,7 @@ export class AuthController {
   }
 
   @Post('users/login')
-  @HttpCode(200)
+  @HttpCode(HttpStatus.OK)
   login(@Body() dto: LoginDto): Promise<UserResponseDto> {
     return this.authService.login(dto);
   }
@@ -36,11 +37,9 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post('users/logout')
-  @HttpCode(204)
+  @HttpCode(HttpStatus.NO_CONTENT)
   async logout(@Req() req: Request & { token?: string }): Promise<void> {
-    if (req.token) {
-      await this.authService.logout(req.token);
-    }
+    await this.authService.logout(req.token ?? '');
   }
 
   @ApiBearerAuth()

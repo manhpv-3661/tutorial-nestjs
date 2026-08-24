@@ -5,21 +5,17 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../../redis/redis.service';
+import { SALT_ROUNDS } from '../users/constants/users.constants';
 import { User } from '../users/entities/user.entity';
+import { CreateUserData } from '../users/interfaces';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
-  type CreateUserInput = {
-    username: string;
-    email: string;
-    password: string;
-  };
-
   let authService: AuthService;
   let usersService: {
     findByEmail: jest.Mock<Promise<User | null>, [string]>;
-    create: jest.Mock<Promise<User>, [CreateUserInput]>;
+    create: jest.Mock<Promise<User>, [CreateUserData]>;
   };
   let jwtService: {
     sign: jest.Mock<string, [{ sub: string }]>;
@@ -44,7 +40,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     usersService = {
       findByEmail: jest.fn<Promise<User | null>, [string]>(),
-      create: jest.fn<Promise<User>, [CreateUserInput]>(),
+      create: jest.fn<Promise<User>, [CreateUserData]>(),
     };
     jwtService = {
       sign: jest
@@ -119,7 +115,7 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException when the password does not match', async () => {
-      const hashed = await bcrypt.hash('correct-password', 10);
+      const hashed = await bcrypt.hash('correct-password', SALT_ROUNDS);
       usersService.findByEmail.mockResolvedValue(
         buildUser({ password: hashed }),
       );
@@ -130,7 +126,7 @@ describe('AuthService', () => {
     });
 
     it('returns a signed token when credentials are valid', async () => {
-      const hashed = await bcrypt.hash('correct-password', 10);
+      const hashed = await bcrypt.hash('correct-password', SALT_ROUNDS);
       usersService.findByEmail.mockResolvedValue(
         buildUser({ password: hashed }),
       );
