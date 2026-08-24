@@ -8,5 +8,10 @@
   "usernameAlreadyTaken": "Username already taken",
   "alreadyFollowing": "You are already following this user",
   "notFollowing": "You are not following this user",
-  "cannotFollowSelf": "You cannot follow yourself"
+  "cannotFollowSelf": "You cannot follow yourself",
+  "articleNotFound": "Article not found",
+  "notArticleAuthor": "You are not the author of this article",
+  "articleSlugConflict": "An article with a similar slug already exists, please try again",
+  "alreadyFavorited": "You have already favorited this article",
+  "notFavorited": "You have not favorited this article"
 }

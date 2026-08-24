@@ -18,6 +18,8 @@ import { UsersModule } from './modules/users/users.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { FollowsModule } from './modules/follows/follows.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
+import { ArticlesModule } from './modules/articles/articles.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { RedisModule } from './redis/redis.module';
 
 @Module({
@@ -57,6 +59,8 @@ import { RedisModule } from './redis/redis.module';
     FollowsModule,
     ProfilesModule,
     AttachmentsModule,
+    FavoritesModule,
+    ArticlesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
