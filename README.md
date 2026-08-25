@@ -48,22 +48,40 @@ npm run test:cov   # coverage
 ## Linting & code standards
 
 ```bash
-npm run lint
+npm run lint           # eslint . --fix        (local, auto-fixes)
+npm run format         # prettier --write .    (local, auto-fixes)
+npm run lint:check     # eslint .              (no --fix — what CI runs)
+npm run format:check   # prettier --check .    (no --write — what CI runs)
+npm run lint:sunlint   # Sunlint (local only, not available on CI)
 ```
+
+Both gates cover the **whole repo** (root `*.ts`, `*.json`, `*.yml`, `*.md`), with
+exclusions declared in `.prettierignore` and the `ignores` block of `eslint.config.mjs`.
+CI only ever runs the `:check` variants, so a formatting error fails the build instead of
+being silently auto-fixed. All text files are LF-only, enforced by `.gitattributes`.
 
 This project also requires [Sunlint](https://coding-standards.sun-asterisk.vn/docs/installation/)
 to be run locally before opening a PR — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+Coding conventions live in [CODING_STANDARD.md](./CODING_STANDARD.md).
 
 ## Project structure
 
 ```
 src/
-  app.controller.ts   # hello-world endpoint
-  app.module.ts        # root module (i18n setup)
-  app.service.ts
+  main.ts              # bootstrap: configureApp() → Swagger → listen
+  app.module.ts        # root module (config, TypeORM, i18n, feature modules)
+  common/              # cross-domain: bootstrap/, decorators/, filters/, utils/
+  config/              # env.validation.ts (Joi), typeorm.config.ts
+  database/migrations/ # TypeORM migrations (synchronize is off)
   i18n/                # en/vi translation files
-  main.ts              # bootstrap, Swagger setup
-test/                   # e2e tests
+  redis/               # global infra module (token blacklist)
+  modules/             # feature modules by domain
+    auth/              # register, login, logout, JWT strategy + guards
+    users/             # user CRUD, avatar update
+    follows/           # follow/unfollow relation
+    profiles/          # public profile (user + following status)
+    attachments/       # uploaded file storage & serving
+test/                  # e2e tests + shared test utils
 ```
 
 ## Contributing
