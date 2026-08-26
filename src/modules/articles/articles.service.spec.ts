@@ -17,7 +17,6 @@ describe('ArticlesService', () => {
     findOne: jest.Mock;
     update: jest.Mock;
     delete: jest.Mock;
-    findAndCount: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let usersService: { findByUsername: jest.Mock };
@@ -40,7 +39,6 @@ describe('ArticlesService', () => {
       findOne: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
-      findAndCount: jest.fn(),
       createQueryBuilder: jest.fn(),
     };
     usersService = { findByUsername: jest.fn() };
@@ -228,6 +226,7 @@ describe('ArticlesService', () => {
     function stubQueryBuilder(result: [unknown[], number]) {
       const qb = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         take: jest.fn().mockReturnThis(),
@@ -260,10 +259,9 @@ describe('ArticlesService', () => {
       expect(result).toEqual({ articles: [], total: 0 });
     });
 
-    it('returns an empty page when the favorited filter resolves to a user with no favorites', async () => {
-      stubQueryBuilder([[], 0]);
+    it('filters by an EXISTS subquery instead of materializing favorited ids', async () => {
+      const qb = stubQueryBuilder([[], 0]);
       usersService.findByUsername.mockResolvedValue({ id: 'user-id' });
-      favoritesService.getFavoritedArticleIds.mockResolvedValue(new Set());
 
       const result = await articlesService.list({
         limit: 20,
@@ -272,25 +270,30 @@ describe('ArticlesService', () => {
       });
 
       expect(result).toEqual({ articles: [], total: 0 });
+      expect(favoritesService.getFavoritedArticleIds).not.toHaveBeenCalled();
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('EXISTS'),
+        { favoritedById: 'user-id' },
+      );
     });
   });
 
   describe('feed', () => {
-    it('returns an empty page when the user follows nobody', async () => {
-      followsService.getFollowingIds.mockResolvedValue(new Set());
+    function stubQueryBuilder(result: [unknown[], number]) {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue(result),
+      };
+      repository.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
 
-      const result = await articlesService.feed('user-id', {
-        limit: 20,
-        offset: 0,
-      });
-
-      expect(result).toEqual({ articles: [], total: 0 });
-      expect(repository.findAndCount).not.toHaveBeenCalled();
-    });
-
-    it('returns articles authored by followed users', async () => {
-      followsService.getFollowingIds.mockResolvedValue(new Set(['author-id']));
-      repository.findAndCount.mockResolvedValue([[{ id: 'article-1' }], 1]);
+    it('filters via an EXISTS subquery against follows, without a separate id lookup', async () => {
+      const qb = stubQueryBuilder([[{ id: 'article-1' }], 1]);
 
       const result = await articlesService.feed('user-id', {
         limit: 20,
@@ -298,6 +301,10 @@ describe('ArticlesService', () => {
       });
 
       expect(result).toEqual({ articles: [{ id: 'article-1' }], total: 1 });
+      expect(followsService.getFollowingIds).not.toHaveBeenCalled();
+      expect(qb.where).toHaveBeenCalledWith(expect.stringContaining('EXISTS'), {
+        currentUserId: 'user-id',
+      });
     });
   });
 
@@ -375,6 +382,26 @@ describe('ArticlesService', () => {
 
       expect(dto.article.favorited).toBe(true);
       expect(dto.article.author.following).toBe(true);
+    });
+  });
+
+  describe('toListResponseDto', () => {
+    it('skips the FollowsService lookup when allAuthorsFollowed is set', async () => {
+      favoritesService.getFavoritesCountMap.mockResolvedValue(new Map());
+      favoritesService.getFavoritedArticleIds.mockResolvedValue(new Set());
+      const page = {
+        articles: [
+          { id: 'article-1', authorId: 'author-id', author },
+        ] as Article[],
+        total: 1,
+      };
+
+      const dto = await articlesService.toListResponseDto(page, 'viewer-id', {
+        allAuthorsFollowed: true,
+      });
+
+      expect(followsService.getFollowingIds).not.toHaveBeenCalled();
+      expect(dto.articles[0].author.following).toBe(true);
     });
   });
 });

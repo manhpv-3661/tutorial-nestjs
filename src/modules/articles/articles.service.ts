@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { I18nService } from 'nestjs-i18n';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { isUniqueViolation } from '../../common/utils/postgres-unique-violation.util';
 import { FavoritesService } from '../favorites/favorites.service';
 import { FollowsService } from '../follows/follows.service';
@@ -128,14 +128,13 @@ export class ArticlesService {
       if (!favoritedBy) {
         return { articles: [], total: 0 };
       }
-      const favoritedArticleIds =
-        await this.favoritesService.getFavoritedArticleIds(favoritedBy.id);
-      if (favoritedArticleIds.size === 0) {
-        return { articles: [], total: 0 };
-      }
-      query.andWhere('article.id IN (:...favoritedArticleIds)', {
-        favoritedArticleIds: [...favoritedArticleIds],
-      });
+      // EXISTS keeps the id list inside SQL instead of pulling every
+      // favorited article id into app memory and binding it as an IN(...)
+      // param list, which errors past Postgres's ~65k bind-parameter limit.
+      query.andWhere(
+        'EXISTS (SELECT 1 FROM article_favorites f WHERE f.article_id = article.id AND f.user_id = :favoritedById)',
+        { favoritedById: favoritedBy.id },
+      );
     }
 
     const [articles, total] = await query.getManyAndCount();
@@ -146,19 +145,18 @@ export class ArticlesService {
     currentUserId: string,
     filter: FeedArticlesFilter,
   ): Promise<ArticlesPage> {
-    const followingIds =
-      await this.followsService.getFollowingIds(currentUserId);
-    if (followingIds.size === 0) {
-      return { articles: [], total: 0 };
-    }
+    const [articles, total] = await this.articlesRepository
+      .createQueryBuilder('article')
+      .leftJoinAndSelect('article.author', 'author')
+      .where(
+        'EXISTS (SELECT 1 FROM follows f WHERE f.following_id = article.authorId AND f.follower_id = :currentUserId)',
+        { currentUserId },
+      )
+      .orderBy('article.createdAt', 'DESC')
+      .skip(filter.offset)
+      .take(filter.limit)
+      .getManyAndCount();
 
-    const [articles, total] = await this.articlesRepository.findAndCount({
-      where: { authorId: In([...followingIds]) },
-      relations: ['author'],
-      order: { createdAt: 'DESC' },
-      skip: filter.offset,
-      take: filter.limit,
-    });
     return { articles, total };
   }
 
@@ -199,6 +197,7 @@ export class ArticlesService {
   async toListResponseDto(
     page: ArticlesPage,
     currentUserId?: string,
+    options?: { allAuthorsFollowed?: boolean },
   ): Promise<ArticlesListResponseDto> {
     const articleIds = page.articles.map((article) => article.id);
     const authorIds = [
@@ -213,9 +212,14 @@ export class ArticlesService {
             articleIds,
           )
         : Promise.resolve(new Set<string>()),
-      currentUserId
-        ? this.followsService.getFollowingIds(currentUserId, authorIds)
-        : Promise.resolve(new Set<string>()),
+      // feed() already filters to articles whose author is followed, so
+      // every author on this page is followed by definition — skip the
+      // redundant lookup FollowsService just did to build the feed.
+      options?.allAuthorsFollowed
+        ? Promise.resolve(new Set(authorIds))
+        : currentUserId
+          ? this.followsService.getFollowingIds(currentUserId, authorIds)
+          : Promise.resolve(new Set<string>()),
     ]);
 
     return ArticlesListResponseDto.fromEntities(page.articles, page.total, {
