@@ -20,6 +20,7 @@ import { FollowsModule } from './modules/follows/follows.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { ArticlesModule } from './modules/articles/articles.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
+import { CommentsModule } from './modules/comments/comments.module';
 import { RedisModule } from './redis/redis.module';
 
 @Module({
@@ -61,6 +62,7 @@ import { RedisModule } from './redis/redis.module';
     AttachmentsModule,
     FavoritesModule,
     ArticlesModule,
+    CommentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

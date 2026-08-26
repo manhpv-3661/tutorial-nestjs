@@ -17,6 +17,7 @@ Mỗi module chỉ chịu trách nhiệm cho **một domain**. Không gộp nhi�
 | `auth`        | Đăng ký, đăng nhập, JWT, blacklist token                        | Thông tin profile user                                               |
 | `articles`    | CRUD article, slug, tagList, feed, ghép author + favorite state | Quan hệ favorite thô (phải gọi qua `FavoritesService`)               |
 | `favorites`   | Quan hệ favorite/unfavorite giữa 1 user và 1 article            | Thông tin article, response DTO                                      |
+| `comments`    | CRUD comment trên 1 article, ghép author + follow state         | Truy vấn article trực tiếp (phải gọi qua `ArticlesService`)          |
 
 **Vì sao:** gộp chung khiến module phình to, khó test độc lập, và một thay đổi ở follow có thể vô tình ảnh hưởng user. Tách riêng giúp mỗi module có thể export đúng những gì module khác cần qua `exports` của `@Module`.
 
@@ -393,6 +394,7 @@ users ──depends on──▶ attachments
 follows ──depends on──▶ users (chỉ entity, qua TypeORM relation)
 articles ──depends on──▶ users, follows, favorites
 favorites ──depends on──▶ users, articles (chỉ entity, qua TypeORM relation)
+comments ──depends on──▶ articles, follows
 attachments ◀── không phụ thuộc module nghiệp vụ nào khác (module lá)
 
 redis (@Global) ──▶ không import module nghiệp vụ nào; được inject ở bất kỳ đâu, không cần import RedisModule
@@ -434,7 +436,7 @@ common/, config/ ◀── tầng thấp nhất: KHÔNG được import giá tr�
 - Bắt buộc thêm e2e cho một flow khi thoả **một trong hai** điều kiện: (1) flow đi xuyên ≥2 module (vd: register ở `auth` → dùng ở `users`/`profiles`), hoặc (2) flow phụ thuộc hành vi DB thật mà unit test mock `Repository` không kiểm chứng được (unique constraint, transaction rollback).
 - Dùng DB/Redis thật qua docker-compose (`test/utils/create-test-app.ts` boot cả `AppModule`), không mock — mục đích của e2e là xác nhận toàn bộ pipeline (guard, pipe, filter, DB constraint) hoạt động đúng với nhau, khác với unit test.
 - Dùng chung `createTestApp()` và `registerUser()` trong `test/utils/` cho mọi file e2e, không copy lại logic bootstrap/tạo user ở từng file (xem mục 5 — extract cấu hình lặp lại).
-- Hiện có: `test/auth.e2e-spec.ts` (register/login/logout/blacklist), `test/users.e2e-spec.ts` (update profile, avatar upload + mime validation), `test/follow.e2e-spec.ts` (follow/unfollow xuyên `profiles`+`follows`+`users`).
+- Hiện có: `test/auth.e2e-spec.ts` (register/login/logout/blacklist), `test/users.e2e-spec.ts` (update profile, avatar upload + mime validation), `test/follow.e2e-spec.ts` (follow/unfollow xuyên `profiles`+`follows`+`users`), `test/articles.e2e-spec.ts` (CRUD + tag/author/favorited filter + feed + favorite/unfavorite), `test/comments.e2e-spec.ts` (add/list/delete comment xuyên `comments`+`articles`+`follows`, author-only delete).
 
 ---
 
