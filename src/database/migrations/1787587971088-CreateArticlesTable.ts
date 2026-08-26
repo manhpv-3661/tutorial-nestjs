@@ -21,6 +21,7 @@ export class CreateArticlesTable1787587971088 implements MigrationInterface {
 
       CREATE INDEX "IDX_articles_author_id" ON "articles" ("author_id");
       CREATE INDEX "IDX_articles_tag_list" ON "articles" USING GIN ("tag_list");
+      CREATE INDEX "IDX_articles_created_at" ON "articles" ("created_at" DESC, "id");
     `);
   }
 
