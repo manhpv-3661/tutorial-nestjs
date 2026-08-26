@@ -456,6 +456,8 @@ common/, config/ ◀── tầng thấp nhất: KHÔNG được import giá tr�
 
 **Áp dụng:** khi đo C2 coverage cho 1 controller/service khác, luôn soi `branchMap`/`b` trong `coverage-final.json` thay vì chỉ đọc % tổng — % branch trên file có nhiều decorator luôn bị kéo thấp giả tạo bởi code compiler sinh ra, không phản ánh đúng coverage logic thật.
 
+**i18n key parity giữa các ngôn ngữ được test tự động, không dựa vào soát tay:** `src/i18n/i18n-key-parity.spec.ts` đọc danh sách file trong `src/i18n/en/` làm chuẩn, rồi assert mọi ngôn ngữ khác (`vi/`, ...) có **đúng cùng bộ file** và mỗi file có **đúng cùng bộ key** (so path dạng `parent.child` cho JSON lồng nhau, dù hiện tại `errors.json`/`validation.json`/`common.json` đều phẳng 1 cấp). Trước đây việc này chỉ được kiểm bằng cách reviewer tự đếm key thủ công trên PR — không có gì chặn một module mới thêm key ở `en/errors.json` mà quên thêm ở `vi/errors.json`, lỗi chỉ lộ ra khi có người thật sự test bằng tiếng Việt. **Áp dụng:** khi thêm ngôn ngữ mới hoặc file i18n mới, không cần sửa gì thêm ở test này — nó tự đọc `en/` làm chuẩn và tự soát mọi ngôn ngữ còn lại.
+
 ---
 
 ## 12. Naming Conventions
@@ -493,7 +495,7 @@ Sunlint là **heuristic**, một số cảnh báo không phản ánh đúng th�
 
 **Rule khi thêm ngoại lệ mới:** không tự ý bỏ qua warning — phải ghi lý do cụ thể vào bảng này khi quyết định "chấp nhận, không sửa", để review sau còn biết đây là quyết định có chủ đích chứ không phải bỏ sót.
 
-**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 19) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
+**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 21) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
 
 ---
 
@@ -660,7 +662,64 @@ query.andWhere(
 
 ---
 
-## 19. Checklist trước khi tạo PR
+## 19. Swagger — Endpoint mới phải khai `@ApiOperation` + `@ApiResponse` cho lỗi
+
+**Rule:** Mọi route handler mới (hoặc route đổi hành vi lỗi) phải có `@ApiOperation({ summary: ... })` mô tả ngắn gọn hành động, và `@ApiResponse` cho **từng** status code lỗi mà route thực sự có thể trả (401/403/404/409...), không chỉ dựa vào `@ApiProperty` trên DTO thành công.
+
+**Vì sao:** hiện tại (soát tới hết PR6) **không có route nào** trong `src/modules/**` khai `@ApiOperation`/`@ApiResponse` — Swagger UI chỉ tự suy ra được response 200 từ DTO trả về (`@ApiProperty`) và path/param, còn toàn bộ case lỗi (vd `409 ConflictException` khi slug trùng, `403 ForbiddenException` khi không phải author, `404` khi không tìm thấy resource) hoàn toàn không xuất hiện trong docs — người đọc Swagger không biết endpoint có thể fail thế nào mà không phải đọc thẳng source code.
+
+**Sai (không có gì ngoài path/param):**
+
+```typescript
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Post(':slug/favorite')
+async favorite(
+  @Param('slug') slug: string,
+  @CurrentUser() currentUser: User,
+): Promise<ArticleResponseDto> {
+  return this.articlesService.toResponseDto(
+    await this.articlesService.favorite(slug, currentUser.id),
+    currentUser.id,
+  );
+}
+```
+
+**Đúng:**
+
+```typescript
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@ApiOperation({ summary: 'Favorite an article' })
+@ApiResponse({ status: 401, description: 'Missing or invalid token' })
+@ApiResponse({ status: 404, description: 'Article not found' })
+@Post(':slug/favorite')
+async favorite(
+  @Param('slug') slug: string,
+  @CurrentUser() currentUser: User,
+): Promise<ArticleResponseDto> {
+  return this.articlesService.toResponseDto(
+    await this.articlesService.favorite(slug, currentUser.id),
+    currentUser.id,
+  );
+}
+```
+
+**Áp dụng:** khi thêm route mới, liệt kê trước các exception mà service phía dưới thực sự throw (đọc thẳng service, không đoán), rồi khai đúng từng `@ApiResponse`. Route hiện có trong repo (từ PR1-PR6) **chưa** được retrofit theo rule này — áp dụng dần khi route đó được sửa/chạm tới, không cần làm 1 lượt riêng.
+
+---
+
+## 20. Test Coverage Threshold
+
+**Rule:** `package.json`'s `jest.coverageThreshold.global` đặt sàn tối thiểu cho `npm run test:cov` (statements 70 / branches 65 / functions 60 / lines 70). `ci.yml` chạy `npm run test:cov` (không phải `npm test` trơn) nên ngưỡng này **thật sự chặn CI**, không chỉ là con số tham khảo.
+
+**Vì sao:** con số này lấy từ coverage đo thật của repo tại thời điểm thêm rule (statements 74.1% / branches 71.04% / functions 66.24% / lines 74.88%), hạ xuống một khoảng an toàn để làm **sàn chống tụt**, không phải mục tiêu để cố đạt. Coverage tổng thấp hơn 100% là **có chủ đích** theo mục 11 ("không viết test cho code chỉ gọi lại thư viện") — file `*.module.ts` (chỉ khai DI wiring), entity (chỉ field + decorator, không logic), `redis.service.ts` (wrapper mỏng qua `ioredis`) đều gần như không có gì để test nên kéo % tổng xuống một cách hợp lý. Threshold ở đây tồn tại để bắt **tụt coverage bất ngờ** (thêm logic mới có nhánh lỗi mà quên viết test), không phải để ép coverage cao giả tạo bằng cách test lại thư viện.
+
+**Áp dụng:** nếu thêm code có nhiều logic mới (branch/condition thật) mà không kèm test, `npm run test:cov` sẽ fail cục bộ trước khi push. Không hạ threshold để né lỗi này — thêm test cho nhánh còn thiếu. Chỉ hạ threshold khi có lý do kiến trúc thật (vd thêm hẳn 1 module chỉ toàn DI wiring không có logic) và phải ghi lại lý do ngay tại chỗ sửa, tương tự mục 14.
+
+---
+
+## 21. Checklist trước khi tạo PR
 
 - [ ] Controller không chứa business logic — chỉ gọi service.
 - [ ] Mỗi module đúng 1 domain, không lẫn nghiệp vụ khác; không có import vòng giữa module (mục 10).
@@ -680,9 +739,11 @@ query.andWhere(
 - [ ] Env var đọc qua `ConfigService.getOrThrow()`, trừ `registerAs()` factory và `data-source.ts` (mục 17.3); không dùng `get()` + `!`.
 - [ ] `git ls-files --eol | grep w/crlf` rỗng — working tree sạch LF (mục 17.1).
 - [ ] `tsconfig.json` vẫn `strict: true`; không nới flag để code mới compile (mục 17.4).
-- [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14. Đây là gate cục bộ, CI không chạy được (mục 14).
+- [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14. Đây là gate cục bộ, CI không chạy được (mục 14). **Đính kèm ảnh chụp kết quả sạch (0 errors) vào PR** trước khi gửi review — bắt buộc theo yêu cầu của mentor, không chỉ chạy xong là đủ.
 - [ ] Chạy `npm run lint:check` và `npm run format:check` (bản không `--fix`/`--write`, phủ **cả repo** chứ không chỉ `src`/`test`) — đây là bản CI thật sự chạy, không phải `lint`/`format` (mục 17.2).
-- [ ] Chạy `npm run build`, `npm test`, và `npm run test:e2e` — cả 3 đều pass.
+- [ ] Chạy `npm run build`, `npm run test:cov`, và `npm run test:e2e` — cả 3 đều pass; `test:cov` không được thấp hơn `coverageThreshold` (mục 20).
 - [ ] Query list/feed chạy trên mọi request có index cho cột `ORDER BY` (mục 18.1).
 - [ ] Filter/feed theo quan hệ user↔bản ghi (favorite, follow...) dùng `EXISTS` trong SQL, không kéo id list vào app rồi `IN (...)` khi tập đó không có cận trên cố định (mục 18.2).
 - [ ] Không có query nào hỏi lại một sự thật mà điều kiện filter/where của bước trước đã đảm bảo sẵn (mục 18.3).
+- [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
+- [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).
