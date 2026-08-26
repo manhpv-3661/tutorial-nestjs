@@ -473,7 +473,7 @@ Sunlint là **heuristic**, một số cảnh báo không phản ánh đúng th�
 
 **Rule khi thêm ngoại lệ mới:** không tự ý bỏ qua warning — phải ghi lý do cụ thể vào bảng này khi quyết định "chấp nhận, không sửa", để review sau còn biết đây là quyết định có chủ đích chứ không phải bỏ sót.
 
-**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 18) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
+**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 19) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
 
 ---
 
@@ -592,7 +592,55 @@ Phía eslint đi cùng hướng: `@typescript-eslint/no-explicit-any` và `no-un
 
 ---
 
-## 18. Checklist trước khi tạo PR
+## 18. Query Performance — Index theo cột sort, tránh vật chất hoá id list, tránh query lặp
+
+**Bối cảnh:** Reviewer phát hiện 3 vấn đề trên PR4 (`articles`) bằng `EXPLAIN ANALYZE` với dữ liệu seed lớn (100k article, user có 70k favorite) — không phải lỗi logic, mà là code đúng khi dữ liệu nhỏ và vỡ dần khi dữ liệu lớn lên.
+
+**18.1 — Index đúng cột dùng để `ORDER BY` trên mọi query list/feed.**
+
+**Rule:** Cột nào xuất hiện trong `ORDER BY` của một query chạy trên **mọi** request list/feed (không phải filter tuỳ chọn) phải có index, kể cả khi migration đã có index cho các cột filter khác.
+
+**Vì sao:** không có index cho `ORDER BY`, Postgres phải quét toàn bảng rồi sort mới lấy được N dòng đầu, bất kể `WHERE` match ít hay nhiều. Đo thật trên `articles` (100k dòng, trang 20 dòng đầu): thiếu index → `Seq Scan` + sort tốn 61,5ms/1.745 buffer; thêm `CREATE INDEX ... ("created_at" DESC, "id")` → còn 0,063ms/4 buffer, vì Postgres đọc index đúng thứ tự cần, không phải sort riêng.
+
+**Áp dụng:** khi thêm bảng mới có endpoint list/feed sort theo 1 cột cố định (thường `created_at DESC`), thêm index cho cột đó ngay trong migration tạo bảng — không đợi đo mới thêm.
+
+**18.2 — Không vật chất hoá id list vào app rồi bind `IN (...)` khi tập id đó không có cận trên cố định — dùng `EXISTS` trong SQL.**
+
+**Sai:**
+
+```typescript
+const favoritedArticleIds = await this.favoritesService.getFavoritedArticleIds(
+  favoritedBy.id,
+); // không giới hạn, kéo hết id
+query.andWhere('article.id IN (:...favoritedArticleIds)', {
+  favoritedArticleIds: [...favoritedArticleIds],
+});
+```
+
+**Vì sao:** kích thước id list ở đây tỉ lệ với dữ liệu của **user** (bao nhiêu bài đã favorite / đang follow), không tỉ lệ với kích thước trang kết quả — nên không có cận trên tự nhiên. Đo thật: user có 70.000 favorite → `GET /articles?favorited=...` trả `500 QueryFailedError: bind message has 4464 parameter formats but 0 parameters` (giao thức Postgres đếm tham số bằng số nguyên 16-bit, vượt 65.535 là tràn) — thông báo lỗi không gợi ý gì tới nguyên nhân thật. Hạ xuống 60.000 thì không lỗi nhưng mất 895ms/request (so với 18ms khi chỉ có 20 favorite), vì mỗi request đều kéo 60.000 dòng về Node rồi dựng lại câu SQL 60.000 tham số.
+
+**Đúng:**
+
+```typescript
+query.andWhere(
+  'EXISTS (SELECT 1 FROM article_favorites f WHERE f.article_id = article.id AND f.user_id = :favoritedById)',
+  { favoritedById: favoritedBy.id },
+);
+```
+
+**Áp dụng:** khi filter/feed dựa trên "user X có quan hệ gì với tập bản ghi Y" (favorite, follow, ...), viết `EXISTS (SELECT 1 FROM <join_table> ...)` ngay trong query builder thay vì gọi service khác lấy `Set<id>` rồi `IN (...)` — trừ khi tập id đó vốn đã bị giới hạn nhỏ và cố định (vd chỉ trong phạm vi id của 1 trang kết quả đã `LIMIT`, như `getFavoritesCountMap`/`getFavoritedArticleIds(userId, articleIds)` dùng khi compose response, khác với dùng để filter).
+
+**18.3 — Không lặp lại một query mà kết quả đã được điều kiện filter phía trước đảm bảo sẵn.**
+
+**Sai:** `feed()` lọc `article.authorId` theo tập đang follow, rồi bước compose response lại gọi `FollowsService.getFollowingIds()` lần nữa chỉ để tính field `author.following` — trong khi ở feed, **theo định nghĩa**, author nào cũng đang được follow.
+
+**Đúng:** truyền thẳng flag/giá trị đã biết xuống bước compose response, không hỏi lại DB một sự thật mà tầng gọi trước đó vừa dùng để filter.
+
+**Áp dụng:** trước khi thêm 1 query batch (`getXxxIds`) vào bước compose response, tự hỏi: điều kiện `WHERE`/filter của query chính có đang đảm bảo sẵn kết quả này cho **mọi** dòng trả về không? Nếu có, truyền thẳng giá trị đó xuống thay vì hỏi lại (xem `toListResponseDto(..., { allAuthorsFollowed: true })` trong `articles.service.ts`).
+
+---
+
+## 19. Checklist trước khi tạo PR
 
 - [ ] Controller không chứa business logic — chỉ gọi service.
 - [ ] Mỗi module đúng 1 domain, không lẫn nghiệp vụ khác; không có import vòng giữa module (mục 10).
@@ -615,3 +663,6 @@ Phía eslint đi cùng hướng: `@typescript-eslint/no-explicit-any` và `no-un
 - [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14. Đây là gate cục bộ, CI không chạy được (mục 14).
 - [ ] Chạy `npm run lint:check` và `npm run format:check` (bản không `--fix`/`--write`, phủ **cả repo** chứ không chỉ `src`/`test`) — đây là bản CI thật sự chạy, không phải `lint`/`format` (mục 17.2).
 - [ ] Chạy `npm run build`, `npm test`, và `npm run test:e2e` — cả 3 đều pass.
+- [ ] Query list/feed chạy trên mọi request có index cho cột `ORDER BY` (mục 18.1).
+- [ ] Filter/feed theo quan hệ user↔bản ghi (favorite, follow...) dùng `EXISTS` trong SQL, không kéo id list vào app rồi `IN (...)` khi tập đó không có cận trên cố định (mục 18.2).
+- [ ] Không có query nào hỏi lại một sự thật mà điều kiện filter/where của bước trước đã đảm bảo sẵn (mục 18.3).
