@@ -204,8 +204,8 @@ export interface UpdateUserData {
 export const ALLOWED_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const MAX_AVATAR_SIZE = 10 * 1024 * 1024;
 
-// helpers/avatar-interceptor.helper.ts
-export function createAvatarInterceptor() {
+// interceptors/avatar-upload.interceptor.ts
+export function createAvatarUploadInterceptor() {
   return FileInterceptor('avatar', {
     limits: { fileSize: MAX_AVATAR_SIZE },
     fileFilter: (_req, file, callback) => {
@@ -219,8 +219,10 @@ export function createAvatarInterceptor() {
 }
 
 // controller
-@UseInterceptors(createAvatarInterceptor())
+@UseInterceptors(createAvatarUploadInterceptor())
 ```
+
+Ví dụ trên là code thật trong repo — `src/modules/users/interceptors/avatar-upload.interceptor.ts` — không phải minh hoạ. Chú ý tên thư mục là `interceptors/` (đúng mục 2.2, đặt cạnh vai trò NestJS thật của nó), **không phải** `helpers/`: repo này không có khái niệm "helper" chung chung nào cả, xem thêm bảng vai trò file bên dưới.
 
 ---
 
@@ -470,6 +472,20 @@ common/, config/ ◀── tầng thấp nhất: KHÔNG được import giá tr�
 | Interface            | PascalCase                       | `AvatarFile`, `UpdateUserData`                                  |
 | Boolean method/field | bắt đầu bằng `is`/`has`/`should` | `isFollowing`, `hasAvatar`                                      |
 | File                 | kebab-case + hậu tố vai trò      | `users.controller.ts`, `follow.entity.ts`, `update-user.dto.ts` |
+
+**Vai trò các loại file phụ trợ — không phải "cứ tách ra là gọi `helper`":** câu hỏi để chọn đúng loại không phải "đặt tên gì cho hay" mà là **file đó có cần DI (inject dependency qua constructor) không**.
+
+| Loại               | Có DI? | Vai trò                                                            | Ví dụ thật trong repo                                                               |
+| ------------------ | ------ | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `*.service.ts`     | Có     | Business logic, gọi service khác, transaction                      | `ArticlesService`, `FollowsService`                                                 |
+| `*.guard.ts`       | Có     | `CanActivate` — chặn/cho qua request trước khi tới handler         | `jwt-auth.guard.ts`, `optional-jwt-auth.guard.ts`                                   |
+| `*.strategy.ts`    | Có     | Passport strategy — xác thực credential, trả `user` hoặc throw     | `jwt.strategy.ts`                                                                   |
+| `*.interceptor.ts` | Không  | Factory function trả về 1 NestJS interceptor **đã cấu hình sẵn**   | `avatar-upload.interceptor.ts` → `createAvatarUploadInterceptor()` (mục 5)          |
+| `*.util.ts`        | Không  | Hàm thuần, input→output, không side-effect, không cấu hình gì thêm | `postgres-unique-violation.util.ts`, `extract-bearer-token.util.ts`, `slug.util.ts` |
+
+Repo này **không có** file nào tên `*.helper.ts` hay thư mục `helpers/` — nếu thấy nhu cầu "tách 1 hàm cấu hình ra cho gọn" (mục 5), dùng đúng hậu tố theo **NestJS đang gọi khái niệm đó là gì** (`interceptor`, `guard`...), không tự chế thêm khái niệm "helper" chung chung. `composer` (vd `articles-response.composer.ts` reviewer từng đề xuất trên PR4) cũng không phải khái niệm riêng — nếu tách, nó vẫn là 1 `*.service.ts` có DI, chỉ là chưa được tạo ra trong repo này (xem mục 18, lý do chưa tách).
+
+Repo cũng không cần khái niệm "mapper" riêng để convert entity → DTO: logic đó nằm ngay trong static method `fromEntity()` của chính DTO class (mục 9) — `ArticleResponseFields.fromEntity()`, không phải 1 file `*.mapper.ts` tách biệt.
 
 ---
 
