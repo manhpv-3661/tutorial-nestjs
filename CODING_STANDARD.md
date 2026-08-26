@@ -438,6 +438,24 @@ common/, config/ ◀── tầng thấp nhất: KHÔNG được import giá tr�
 - Dùng chung `createTestApp()` và `registerUser()` trong `test/utils/` cho mọi file e2e, không copy lại logic bootstrap/tạo user ở từng file (xem mục 5 — extract cấu hình lặp lại).
 - Hiện có: `test/auth.e2e-spec.ts` (register/login/logout/blacklist), `test/users.e2e-spec.ts` (update profile, avatar upload + mime validation), `test/follow.e2e-spec.ts` (follow/unfollow xuyên `profiles`+`follows`+`users`), `test/articles.e2e-spec.ts` (CRUD + tag/author/favorited filter + feed + favorite/unfavorite), `test/comments.e2e-spec.ts` (add/list/delete comment xuyên `comments`+`articles`+`follows`, author-only delete).
 
+**E2E dùng database riêng, tự seed/truncate mỗi test case:**
+
+- `.env.test` (khai commit trong repo, khác `.env` chỉ ở `DB_NAME=nestjs_tutorial_test`) — e2e **không bao giờ** chạy trên DB dev. Trước PR6, e2e chạy chung `.env`/DB dev nên mỗi lần chạy tích luỹ rác (697 user/102 article rác từng thấy trong DB dev khi audit lại) — tách DB riêng để triệt để.
+- `test/utils/setup-env.ts` nạp `.env.test` qua `dotenv.config()` ở `setupFiles` (chạy **trước** khi `AppModule`/`ConfigModule.forRoot()` được import) — dotenv mặc định không override biến đã có sẵn trong `process.env`, nên trên CI (đã set `DB_NAME` thật ở job `env:`) file `.env.test` bị bỏ qua tự nhiên, không cần sửa `ci.yml`.
+- `test/utils/db-reset.ts` (`truncateAllTables`) + `test/utils/seed-database.ts` (`seedDatabase`, 2 user cố định `seed_alice`/`seed_bob`) được gắn vào `beforeEach`/`afterEach` **toàn cục** qua `test/utils/reset-database.setup.ts` (khai ở `setupFilesAfterEnv`) — mọi file `*.e2e-spec.ts` tự động seed trước và truncate sau **mỗi** test case, không cần từng file tự gọi. `createTestApp()` lưu `DataSource` của app đang chạy vào biến module-scope (`getActiveDataSource()`) để hook toàn cục lấy được đúng connection.
+- **Bắt buộc `--runInBand`** (`npm run test:e2e`) vì truncate là thao tác toàn DB — nếu Jest chạy nhiều file e2e song song (nhiều worker) trên cùng 1 DB test, file này truncate sẽ xoá luôn dữ liệu file kia đang test giữa chừng, gây flaky. Chạy tuần tự loại bỏ hoàn toàn rủi ro này.
+- Migration cho DB test: `npm run migration:run:test` (dùng `data-source.test.ts`, đọc `.env.test`) — chạy 1 lần khi tạo DB test mới hoặc sau khi thêm migration mới, tương tự `migration:run` cho DB dev.
+- Dữ liệu seed (`seed_alice`/`seed_bob`) dùng username/email cố định, tách biệt hẳn với `registerUser()` (luôn sinh `user_<uuid>` ngẫu nhiên) — test hiện tại không assert danh sách toàn bộ user/article nên seed không phá assertion nào, chỉ đảm bảo DB không rỗng trước mỗi test như yêu cầu.
+
+**Coverage sâu (C2 — condition coverage) cho ít nhất 1 controller:** `comments` module (`CommentsController` + `CommentsService`) được chọn làm ví dụ — `test/comments.e2e-spec.ts` phủ cả 2 nhánh của mọi điều kiện đơn trong 2 file này (có/không token; article tồn tại/không; comment tồn tại/không; đúng/sai tác giả; viewer ẩn danh/đã đăng nhập; follow/không follow tác giả comment; body hợp lệ/rỗng).
+
+Đo bằng `npm run test:e2e:cov` (config `collectCoverageFrom` trong `test/jest-e2e.json` giới hạn vào `src/modules/comments/**/*.ts`). Kết quả đo thực tế: `comments.service.ts` 97.14% statement / 100% function; `comments.controller.ts` 100% statement / 100% function. Branch coverage báo 75-77% ở cả 2 file, nhưng khi soi từng nhánh cụ thể (`coverage-e2e/coverage-final.json`, field `branchMap`+`b`):
+
+- **`CommentsController`: toàn bộ nhánh "chưa phủ" nằm ở dòng `constructor(...)` và chữ ký method (`create`/`list`/`delete`)** — đây là code do TypeScript compiler tự sinh cho decorator metadata (`emitDecoratorMetadata`, cần cho Nest DI/reflection: `@Param`, `@Body`, `@CurrentUser`, `@Post`/`@Get`/`@Delete`...), không phải logic nghiệp vụ. Thân method của `CommentsController` hoàn toàn tuyến tính (gọi service → return), không có `if`/ternary nào — 0 nhánh nghiệp vụ thật để thiếu.
+- **`CommentsService`: chỉ 1 nhánh nghiệp vụ thật chưa phủ** — `if (!comment)` trong `findByIdOrThrow` (dòng 46). Method này chỉ được gọi nội bộ từ `create()` ngay sau `save()` thành công nên luôn tìm thấy — nhánh `NotFoundException` không có đường gọi nào từ controller để chạm tới qua e2e. Đã test ở `comments.service.spec.ts` (unit, gọi thẳng `findByIdOrThrow('ghost')`). Mọi ternary/`if` nghiệp vụ khác (`toResponseDto`, `toListResponseDto`, `deleteByIdForArticle`) đều phủ cả 2 chiều qua e2e.
+
+**Áp dụng:** khi đo C2 coverage cho 1 controller/service khác, luôn soi `branchMap`/`b` trong `coverage-final.json` thay vì chỉ đọc % tổng — % branch trên file có nhiều decorator luôn bị kéo thấp giả tạo bởi code compiler sinh ra, không phản ánh đúng coverage logic thật.
+
 ---
 
 ## 12. Naming Conventions

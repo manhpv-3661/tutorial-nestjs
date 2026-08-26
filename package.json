@@ -20,12 +20,17 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
+    "test:e2e:cov": "jest --config ./test/jest-e2e.json --runInBand --coverage --coverageDirectory=coverage-e2e",
     "migration:create": "typeorm-ts-node-commonjs migration:create",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d ./data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d ./data-source.ts",
     "schema:drop": "typeorm-ts-node-commonjs schema:drop -d ./data-source.ts",
-    "migration:reset": "npm run schema:drop && npm run migration:run"
+    "migration:reset": "npm run schema:drop && npm run migration:run",
+    "migration:run:test": "typeorm-ts-node-commonjs migration:run -d ./data-source.test.ts",
+    "migration:revert:test": "typeorm-ts-node-commonjs migration:revert -d ./data-source.test.ts",
+    "schema:drop:test": "typeorm-ts-node-commonjs schema:drop -d ./data-source.test.ts",
+    "migration:reset:test": "npm run schema:drop:test && npm run migration:run:test"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
