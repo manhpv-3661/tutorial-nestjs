@@ -660,6 +660,14 @@ query.andWhere(
 
 **Áp dụng:** trước khi thêm 1 query batch (`getXxxIds`) vào bước compose response, tự hỏi: điều kiện `WHERE`/filter của query chính có đang đảm bảo sẵn kết quả này cho **mọi** dòng trả về không? Nếu có, truyền thẳng giá trị đó xuống thay vì hỏi lại (xem `toListResponseDto(..., { allAuthorsFollowed: true })` trong `articles.service.ts`).
 
+**18.4 — List endpoint trên bảng có thể tăng không giới hạn phải có pagination, hoặc ghi rõ lý do vì sao cố tình không có.**
+
+**Rule:** trước khi thêm 1 list endpoint mới (hoặc method service trả về mảng không giới hạn), tự hỏi bảng nguồn có thể tăng không giới hạn theo thời gian/theo hành vi user không (khác với quan hệ 1-owner-vài-bản-ghi như attachment/avatar). Nếu có, endpoint phải nhận `limit`/`offset` — tái sử dụng `PaginationQueryDto` đã có ở `articles`, không tự chế lại. Nếu cố tình bỏ pagination vì lý do spec/UX, phải ghi rõ lý do bằng comment WHY ngay tại chỗ khai method (mục 13), không im lặng bỏ qua.
+
+**Ví dụ đã biết, chưa sửa — `CommentsService.listByArticle()`:** hiện fetch **toàn bộ** comment của 1 article, không giới hạn. Đây khớp đúng RealWorld spec gốc (comment không phân trang) nên là quyết định có chủ đích, nhưng có cùng hình dạng "tăng không giới hạn" như lỗi vừa sửa ở mục 18.2 cho `articles`: một bài viral có hàng chục nghìn comment sẽ kéo hết về cùng lúc trong 1 query. Đã ghi lại lý do bằng comment WHY tại chỗ thay vì âm thầm bỏ qua — xem `comments.service.ts`.
+
+**Áp dụng:** khi thêm list endpoint mới, mặc định thêm `PaginationQueryDto`. Nếu quyết định không phân trang, dòng comment WHY tại chỗ khai method là bắt buộc, không phải tuỳ chọn.
+
 ---
 
 ## 19. Swagger — Endpoint mới phải khai `@ApiOperation` + `@ApiResponse` cho lỗi
@@ -745,5 +753,6 @@ async favorite(
 - [ ] Query list/feed chạy trên mọi request có index cho cột `ORDER BY` (mục 18.1).
 - [ ] Filter/feed theo quan hệ user↔bản ghi (favorite, follow...) dùng `EXISTS` trong SQL, không kéo id list vào app rồi `IN (...)` khi tập đó không có cận trên cố định (mục 18.2).
 - [ ] Không có query nào hỏi lại một sự thật mà điều kiện filter/where của bước trước đã đảm bảo sẵn (mục 18.3).
+- [ ] List endpoint mới trên bảng có thể tăng không giới hạn có `limit`/`offset` (`PaginationQueryDto`), hoặc có comment WHY giải thích rõ vì sao cố tình không phân trang (mục 18.4).
 - [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
 - [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).

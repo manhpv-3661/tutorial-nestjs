@@ -50,6 +50,9 @@ export class CommentsService {
   }
 
   async listByArticle(articleId: string): Promise<Comment[]> {
+    // Intentionally unpaginated: matches the RealWorld spec, which does not
+    // paginate comments. Fetches every comment for the article, so a viral
+    // article with tens of thousands of comments pulls them all in one query.
     return this.commentsRepository.find({
       where: { articleId },
       relations: ['author'],
