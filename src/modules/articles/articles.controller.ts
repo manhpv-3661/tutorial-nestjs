@@ -63,7 +63,9 @@ export class ArticlesController {
     @CurrentUser() currentUser: User,
   ): Promise<ArticlesListResponseDto> {
     const page = await this.articlesService.feed(currentUser.id, query);
-    return this.articlesService.toListResponseDto(page, currentUser.id);
+    return this.articlesService.toListResponseDto(page, currentUser.id, {
+      allAuthorsFollowed: true,
+    });
   }
 
   @UseGuards(OptionalJwtAuthGuard)
