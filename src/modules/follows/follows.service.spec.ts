@@ -9,7 +9,7 @@ import { FollowsService } from './follows.service';
 describe('FollowsService', () => {
   let followsService: FollowsService;
   let repository: {
-    findOne: jest.Mock;
+    exists: jest.Mock;
     insert: jest.Mock;
     delete: jest.Mock;
     find: jest.Mock;
@@ -17,7 +17,7 @@ describe('FollowsService', () => {
 
   beforeEach(async () => {
     repository = {
-      findOne: jest.fn(),
+      exists: jest.fn(),
       insert: jest.fn(),
       delete: jest.fn(),
       find: jest.fn(),
@@ -39,16 +39,16 @@ describe('FollowsService', () => {
 
   describe('isFollowing', () => {
     it('returns true when a follow row exists', async () => {
-      repository.findOne.mockResolvedValue({
-        followerId: 'a',
-        followingId: 'b',
-      });
+      repository.exists.mockResolvedValue(true);
 
       await expect(followsService.isFollowing('a', 'b')).resolves.toBe(true);
+      expect(repository.exists).toHaveBeenCalledWith({
+        where: { followerId: 'a', followingId: 'b' },
+      });
     });
 
     it('returns false when no follow row exists', async () => {
-      repository.findOne.mockResolvedValue(null);
+      repository.exists.mockResolvedValue(false);
 
       await expect(followsService.isFollowing('a', 'b')).resolves.toBe(false);
     });
@@ -63,10 +63,7 @@ describe('FollowsService', () => {
     });
 
     it('throws ConflictException when already following', async () => {
-      repository.findOne.mockResolvedValue({
-        followerId: 'a',
-        followingId: 'b',
-      });
+      repository.exists.mockResolvedValue(true);
 
       await expect(followsService.follow('a', 'b')).rejects.toBeInstanceOf(
         ConflictException,
@@ -75,7 +72,7 @@ describe('FollowsService', () => {
     });
 
     it('inserts a new follow row otherwise', async () => {
-      repository.findOne.mockResolvedValue(null);
+      repository.exists.mockResolvedValue(false);
 
       await followsService.follow('a', 'b');
 
@@ -86,7 +83,7 @@ describe('FollowsService', () => {
     });
 
     it('maps a race-condition unique-violation on insert to ConflictException', async () => {
-      repository.findOne.mockResolvedValue(null);
+      repository.exists.mockResolvedValue(false);
       const dbError = new QueryFailedError('INSERT ...', [], {
         code: '23505',
       } as unknown as Error);
@@ -98,7 +95,7 @@ describe('FollowsService', () => {
     });
 
     it('rethrows any other database error from insert unchanged', async () => {
-      repository.findOne.mockResolvedValue(null);
+      repository.exists.mockResolvedValue(false);
       const dbError = new QueryFailedError('INSERT ...', [], {
         code: '23502',
       } as unknown as Error);

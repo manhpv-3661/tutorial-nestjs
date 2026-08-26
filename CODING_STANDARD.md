@@ -668,6 +668,29 @@ query.andWhere(
 
 **Áp dụng:** khi thêm list endpoint mới, mặc định thêm `PaginationQueryDto`. Nếu quyết định không phân trang, dòng comment WHY tại chỗ khai method là bắt buộc, không phải tuỳ chọn.
 
+**18.5 — Check tồn tại (exists) dùng `Repository.exists()`, không `findOne()` rồi so `!== null`.**
+
+**Sai:**
+
+```typescript
+async isFavorited(userId: string, articleId: string): Promise<boolean> {
+  const favorite = await this.favoritesRepository.findOne({ where: { userId, articleId } });
+  return favorite !== null; // fetch nguyên row rồi vứt đi, chỉ cần biết có/không
+}
+```
+
+**Đúng:**
+
+```typescript
+async isFavorited(userId: string, articleId: string): Promise<boolean> {
+  return this.favoritesRepository.exists({ where: { userId, articleId } });
+}
+```
+
+**Vì sao:** `findOne()` bắt TypeORM build lại toàn bộ entity từ row (mọi cột) chỉ để kiểm tra khác `null`. `exists()` (có sẵn từ TypeORM 0.3.x, repo đang dùng `^0.3.31`) sinh câu SQL gọn hơn, không cần hydrate entity — đúng việc cần làm là "có hàng nào khớp điều kiện không", không phải "lấy hàng đó về". Bug thật (không phải giả định): `FollowsService.isFollowing()` và `FavoritesService.isFavorited()` đều dùng `findOne()` kiểu này, trong khi `FavoritesService.countForArticle()` ngay cạnh đó lại đã dùng đúng pattern tương đương (`repository.count(...)`) — tức là một phần code trong cùng file đã biết cách làm đúng, phần còn lại thì chưa. 2 method này bị gọi rất thường xuyên: mỗi lần xem 1 article, mỗi lần follow/favorite đều gọi trước khi ghi.
+
+**Áp dụng:** khi viết method chỉ trả `boolean` cho câu hỏi "bản ghi X có tồn tại không", dùng `repository.exists({ where })`, không `findOne()` + so `null`. `findOne()` chỉ dùng khi thực sự cần dữ liệu của row đó.
+
 ---
 
 ## 19. Swagger — Endpoint mới phải khai `@ApiOperation` + `@ApiResponse` cho lỗi
@@ -754,5 +777,6 @@ async favorite(
 - [ ] Filter/feed theo quan hệ user↔bản ghi (favorite, follow...) dùng `EXISTS` trong SQL, không kéo id list vào app rồi `IN (...)` khi tập đó không có cận trên cố định (mục 18.2).
 - [ ] Không có query nào hỏi lại một sự thật mà điều kiện filter/where của bước trước đã đảm bảo sẵn (mục 18.3).
 - [ ] List endpoint mới trên bảng có thể tăng không giới hạn có `limit`/`offset` (`PaginationQueryDto`), hoặc có comment WHY giải thích rõ vì sao cố tình không phân trang (mục 18.4).
+- [ ] Method chỉ trả `boolean` cho câu hỏi tồn tại dùng `repository.exists()`, không `findOne()` + so `null` (mục 18.5).
 - [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
 - [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).
