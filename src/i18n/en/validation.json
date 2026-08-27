@@ -1,6 +1,14 @@
 {
   "IS_EMAIL": "Email must be a valid email address",
   "IS_STRING": "This field must be a string",
+  "IS_ARRAY": "This field must be an array",
+  "IS_INT": "This field must be an integer",
   "MIN_LENGTH_USERNAME": "Username must be at least 3 characters",
-  "MIN_LENGTH_PASSWORD": "Password must be at least 8 characters"
+  "MIN_LENGTH_PASSWORD": "Password must be at least 8 characters",
+  "MIN_LENGTH_TITLE": "Title must not be empty",
+  "MIN_LENGTH_DESCRIPTION": "Description must not be empty",
+  "MIN_LENGTH_BODY": "Body must not be empty",
+  "MIN_LIMIT": "Limit must be at least 1",
+  "MAX_LIMIT": "Limit must not exceed 100",
+  "MIN_OFFSET": "Offset must not be negative"
 }
