@@ -707,6 +707,47 @@ async isFavorited(userId: string, articleId: string): Promise<boolean> {
 
 **Áp dụng:** khi viết method chỉ trả `boolean` cho câu hỏi "bản ghi X có tồn tại không", dùng `repository.exists({ where })`, không `findOne()` + so `null`. `findOne()` chỉ dùng khi thực sự cần dữ liệu của row đó.
 
+**18.6 — Tránh N+1: gom id của cả trang rồi hỏi DB một lần, không lặp qua từng item rồi query riêng.**
+
+**Sai (N+1 — 20 article thành 21 query):**
+
+```typescript
+async toListResponseDto(articles: Article[]): Promise<ArticleResponseFields[]> {
+  return Promise.all(
+    articles.map(async (article) => {
+      const favorited = await this.favoritesService.isFavorited(userId, article.id); // 1 query/article
+      return ArticleResponseFields.fromEntity(article, { favorited /* ... */ });
+    }),
+  );
+}
+```
+
+**Đúng (batch — hằng số query bất kể trang có bao nhiêu article):**
+
+```typescript
+const favoritedIds = await this.favoritesService.getFavoritedArticleIds(
+  userId,
+  articleIds,
+); // 1 query cho cả trang
+return articles.map((article) =>
+  ArticleResponseFields.fromEntity(article, {
+    favorited: favoritedIds.has(article.id) /* ... */,
+  }),
+);
+```
+
+**Vì sao:** đây là điểm reviewer đánh giá cao nhất trên PR4 ("Không có N+1 — đây là điểm đáng giá nhất của PR") — nhưng trước khi thêm mục này, cả `CODING_STANDARD.md` **không có chỗ nào ghi chữ "N+1"**, kỹ thuật làm đúng chỉ được nhắc thoáng qua trong ví dụ ở mục 18.3. Đo thật trên repo (20 article, 20 tác giả khác nhau, TypeORM query log): `GET /articles` ẩn danh 4 query, đã đăng nhập 7 query, `/feed` 8 query, `/:slug` 6 query — **hằng số**, không tăng theo số bài, nhờ `getFavoritesCountMap`/`getFavoritedArticleIds`/`getFollowingIds` gom id cả trang rồi hỏi một lần, trả `Map`/`Set` để tra O(1). Lặp qua từng item gọi `isFavorited()` riêng lẻ sẽ biến 20 bài thành 60+ query.
+
+**Áp dụng:** bất kỳ chỗ nào ghép dữ liệu quan hệ (favorite/follow/comment-count...) cho **một danh sách** bản ghi, viết method dạng `getXxxIds(ownerIds, targetIds?)`/`getXxxCountMap(targetIds)` trả `Set`/`Map`, gọi đúng 1 lần cho cả trang trước khi map qua từng item — không gọi lại 1 method dành cho single-item (`isFollowing`, `isFavorited`...) bên trong `.map()`/vòng lặp.
+
+**18.7 — Connection pool và statement timeout phải được khai tường minh, không im lặng dựa vào default của driver.**
+
+**Rule:** `DataSourceOptions.extra` phải khai rõ `max` (pool size) và `statement_timeout` (ms), thay vì để trống và dựa vào default của `pg.Pool`.
+
+**Vì sao:** trước khi thêm rule này, `src/config/typeorm.config.ts` hoàn toàn không có `extra` — nghĩa là chạy 100% theo default ngầm của driver `pg`: pool tối đa 10 connection, và **không có statement timeout nào cả**. Không có statement timeout là rủi ro thật: 1 câu query treo/chạy runaway (bug logic, hoặc query bị khoá do lock chờ) sẽ giữ nguyên 1 connection trong pool vô thời hạn, dần dần rút cạn pool cho tới khi request khác không lấy được connection nữa — mà không có gì báo lỗi rõ ràng tại thời điểm đó.
+
+**Áp dụng:** `extra: { max: 10, statement_timeout: 10_000 }` trong `buildDataSourceOptions()` (dùng chung cho `data-source.ts` và app runtime, xem mục 17.3) — `max` giữ nguyên giá trị default (không đổi hành vi, chỉ khai tường minh để đây là quyết định có chủ đích), `statement_timeout` 10s đủ dư cho mọi query hiện tại của app (lookup đơn/list phân trang) nhưng chặn được query treo vô hạn. Nếu sau này có query hợp lệ cần lâu hơn 10s (vd migration trên bảng lớn), tăng giá trị này kèm ghi lý do, không xoá bỏ timeout.
+
 ---
 
 ## 19. Swagger — Endpoint mới phải khai `@ApiOperation` + `@ApiResponse` cho lỗi
@@ -794,5 +835,7 @@ async favorite(
 - [ ] Không có query nào hỏi lại một sự thật mà điều kiện filter/where của bước trước đã đảm bảo sẵn (mục 18.3).
 - [ ] List endpoint mới trên bảng có thể tăng không giới hạn có `limit`/`offset` (`PaginationQueryDto`), hoặc có comment WHY giải thích rõ vì sao cố tình không phân trang (mục 18.4).
 - [ ] Method chỉ trả `boolean` cho câu hỏi tồn tại dùng `repository.exists()`, không `findOne()` + so `null` (mục 18.5).
+- [ ] Ghép dữ liệu quan hệ cho 1 danh sách bản ghi dùng batch `getXxxIds`/`getXxxCountMap` gọi 1 lần, không lặp gọi method single-item bên trong vòng lặp/`.map()` (mục 18.6).
+- [ ] `DataSourceOptions.extra` có khai `max`/`statement_timeout` tường minh, không để trống dựa vào default driver (mục 18.7).
 - [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
 - [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).
