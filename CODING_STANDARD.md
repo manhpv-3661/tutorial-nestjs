@@ -133,6 +133,10 @@ async getProfile(@Param('username') username: string, @CurrentUser() currentUser
 }
 ```
 
+**Việc dựng response DTO cũng tính là "xử lý", phải nằm trong service — kể cả khi không cần query DB thêm.** Bug thật đã có trong repo: `AuthController.getCurrentUser()` và `UsersController.updateCurrentUser()` tự gọi `UserResponseDto.fromEntity(user, token)` ngay trong controller, trong khi `AuthService.register()`/`login()` (cùng file, cùng trả `UserResponseDto`) đã làm đúng — dựng DTO trong service. Lý do sai không rõ ràng như "gọi thẳng DB": không có query nào bị lộ ra controller, chỉ là 1 lệnh gọi factory thuần — nhưng vẫn phá vỡ ranh giới trách nhiệm và không nhất quán với chính 2 hàm khác trong cùng class. Đã fix bằng cách thêm `UsersService.toResponseDto(user, token)` / `AuthService.getCurrentUser(user, token)`, controller chỉ còn gọi lại.
+
+**Áp dụng:** kể cả khi dựng response chỉ là 1 lệnh gọi static factory không cần `await`/query gì thêm, vẫn đặt trong service, không gọi `XxxResponseDto.fromEntity()` trực tiếp từ controller.
+
 ---
 
 ## 4. Type Extraction — Không dùng inline union type
@@ -511,7 +515,7 @@ Sunlint là **heuristic**, một số cảnh báo không phản ánh đúng th�
 
 **Rule khi thêm ngoại lệ mới:** không tự ý bỏ qua warning — phải ghi lý do cụ thể vào bảng này khi quyết định "chấp nhận, không sửa", để review sau còn biết đây là quyết định có chủ đích chứ không phải bỏ sót.
 
-**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 21) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
+**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 22) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
 
 ---
 
@@ -807,9 +811,19 @@ async favorite(
 
 ---
 
-## 21. Checklist trước khi tạo PR
+## 21. Field free-text phải có `@MaxLength`
 
-- [ ] Controller không chứa business logic — chỉ gọi service.
+**Rule:** Mọi field kiểu `string` nhận nội dung tự do từ client (title, description, body, comment...) phải có `@MaxLength` bên cạnh `@MinLength`/`@IsString`, giá trị lấy từ constant trong `constants/` của module — không hardcode số trong decorator.
+
+**Vì sao:** trước khi thêm rule này, `title`/`description`/`body` của article và `body` của comment chỉ có `@MinLength(1)`, không có cận trên nào — validation layer chấp nhận request tuỳ ý dài. Không có gì "vỡ ngay" như mục 18 (Express body-parser mặc định đã chặn ở ~100kb/request), nhưng đây là dạng "chưa ai quyết định tường minh" giống hệt mục 18.7 trước khi fix: không ai chọn 1 giới hạn cụ thể, index/storage cứ lớn dần theo dữ liệu người dùng tự nhập mà không kiểm soát được.
+
+**Áp dụng:** `MAX_TITLE_LENGTH`/`MAX_DESCRIPTION_LENGTH`/`MAX_BODY_LENGTH` (`articles.constants.ts`), `MAX_BODY_LENGTH` (`comments.constants.ts`) — mỗi module tự định nghĩa hằng số riêng theo đúng mục 12 (constant thuộc domain nào nằm trong `constants/` của module đó), không dùng chung 1 hằng số toàn cục cho mọi loại field.
+
+---
+
+## 22. Checklist trước khi tạo PR
+
+- [ ] Controller không chứa business logic — chỉ gọi service. Kể cả dựng response DTO (`XxxResponseDto.fromEntity()`) cũng phải nằm trong service, không gọi thẳng từ controller (mục 3).
 - [ ] Mỗi module đúng 1 domain, không lẫn nghiệp vụ khác; không có import vòng giữa module (mục 10).
 - [ ] `{feature}.controller.ts`/`.service.ts`/`.module.ts` phẳng ở root module; `dto/`, `entities/`, `guards/`, `constants/`, `interfaces/`... đúng subfolder theo vai trò (mục 2.2).
 - [ ] File mới đặt đúng tầng: dùng chung → `common/` (helper hậu tố `.util.ts`), infra → `src/{infra}/`, nghiệp vụ → `src/modules/{feature}/` (mục 2.1). `common/` không import giá trị từ `modules/` — nếu cần shape thì `import type` (mục 10).
@@ -837,5 +851,6 @@ async favorite(
 - [ ] Method chỉ trả `boolean` cho câu hỏi tồn tại dùng `repository.exists()`, không `findOne()` + so `null` (mục 18.5).
 - [ ] Ghép dữ liệu quan hệ cho 1 danh sách bản ghi dùng batch `getXxxIds`/`getXxxCountMap` gọi 1 lần, không lặp gọi method single-item bên trong vòng lặp/`.map()` (mục 18.6).
 - [ ] `DataSourceOptions.extra` có khai `max`/`statement_timeout` tường minh, không để trống dựa vào default driver (mục 18.7).
+- [ ] Field free-text (title/description/body/comment...) có `@MaxLength` lấy từ constant của module, không chỉ `@MinLength` (mục 21).
 - [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
 - [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).
