@@ -600,6 +600,16 @@ Sau khi renormalize, `git diff --exit-code` phải trả về 0 cho các file đ
 
 **Gate phải phủ CẢ REPO, không chỉ glob `src`/`test`.** Trước đây script dùng glob thủ công (`prettier --check "src/**/*.ts" "test/**/*.ts"`, `eslint "{src,apps,libs,test}/**/*.ts"`) nên **không** phủ: `data-source.ts` (file TS thật ở root, có 7 lỗi format mà CI không thấy), `eslint.config.mjs`, toàn bộ `*.json` / `*.yml` / `*.md` (kể cả `ci.yml`, `tsconfig.json`, `src/i18n/**`). Glob "an toàn" như vậy là cách âm thầm nhất để gate mất tác dụng — file không khớp glob thì không bao giờ fail.
 
+**17.6 — `npm run build` xanh và `npm run test:e2e` xanh không chứng minh app thật sự chạy được từ `dist/`.**
+
+**Bug thật, nghiêm trọng, tồn tại xuyên suốt PR1-PR6 mà không CI check nào bắt được:** `npm run start:prod` (`node dist/main`) **crash ngay khi boot** — `I18nModule` báo `ENOENT: no such file or directory, scandir 'dist/src/i18n/'`. Nguyên nhân: `tsconfig.build.json` loại trừ `data-source.ts` khỏi build nhưng **quên** loại trừ `data-source.test.ts` (file thêm sau ở PR6, nằm ở root repo, cạnh `src/`). Vì `data-source.test.ts` vẫn nằm trong tập file compile, TypeScript suy ra `rootDir` chung là **root repo** (không phải `src/`) — toàn bộ `src/**` bị nén thêm 1 cấp thành `dist/src/**`, trong khi `nest-cli.json` copy asset `i18n/**/*` (glob tính từ `sourceRoot: "src"`) lại ra `dist/i18n/` (không có tiền tố `src/`). Hai đường dẫn lệch nhau đúng 1 cấp — `app.module.ts` tìm i18n ở `dist/src/i18n/` (theo `__dirname` lúc runtime của bản build lệch), asset lại nằm ở `dist/i18n/`.
+
+**Vì sao không CI job nào bắt được suốt 6 pull:** `npm run build` chỉ chạy `tsc` — chứng minh code hợp lệ về **type**, không hề thử **chạy** artifact vừa build ra. `npm run test:e2e` import thẳng `AppModule` từ **source TypeScript** qua `ts-jest` (`test/utils/create-test-app.ts`), không đụng tới `dist/` — nên `__dirname` lúc test luôn trỏ đúng `src/`, không bao giờ tái hiện được lỗi lệch đường dẫn này. Nghĩa là 2 gate tưởng như đã phủ đủ ("build sạch" + "e2e xanh") **cùng nhau vẫn để lọt 1 lỗi khiến app thật sự không khởi động được**.
+
+**Đã fix:** thêm `data-source.test.ts` vào `exclude` của `tsconfig.build.json` (khôi phục `rootDir` suy ra đúng về `src/`, output về lại `dist/**` không tiền tố), đồng thời thu hẹp `nest-cli.json`'s `assets` từ `"i18n/**/*"` thành `"i18n/**/*.json"` (glob cũ vô tình copy nhầm cả `i18n-key-parity.spec.ts` vào artifact production). Verify bằng cách thật sự chạy `npm run start:prod`, curl `/api-docs` (200) và 1 request thật gây lỗi validate (message trả về đúng tiếng Anh) — không chỉ tin vào exit code của `build`.
+
+**Áp dụng:** khi thêm file `.ts` mới ở **repo root** (ngang hàng `data-source.ts`, không nằm trong `src/`), luôn kiểm tra `tsconfig.build.json`'s `exclude` đã liệt kê file đó chưa nếu nó không cần có trong production build. Định kỳ (hoặc sau khi đổi `tsconfig.build.json`/`nest-cli.json`), chạy thật `npm run build && npm run start:prod` rồi curl thử 1 endpoint — đừng chỉ tin `tsc`/`test:e2e` xanh là app chạy được, vì cả 2 đều không đi qua `dist/` theo đúng cách production thật sự chạy.
+
 **Rule:** dùng `prettier --check .` / `prettier --write .` và `eslint .` (flat config tự quyết định file nào được lint), rồi khai loại trừ **một nơi duy nhất**: `.prettierignore` cho prettier, `ignores: [...]` trong `eslint.config.mjs` cho eslint (`dist`, `coverage`, `storage`, `package-lock.json`, `.sunlint-eslint.config.js`). Thêm file/loại file mới vào repo là tự động được gate, không phải nhớ sửa glob.
 
 **17.3 — Đọc env var: `ConfigService.getOrThrow()`, trừ `registerAs()` factory.**
@@ -841,6 +851,7 @@ async favorite(
 - [ ] Env var đọc qua `ConfigService.getOrThrow()`, trừ `registerAs()` factory và `data-source.ts` (mục 17.3); không dùng `get()` + `!`.
 - [ ] `git ls-files --eol | grep w/crlf` rỗng — working tree sạch LF (mục 17.1).
 - [ ] `tsconfig.json` vẫn `strict: true`; không nới flag để code mới compile (mục 17.4).
+- [ ] Nếu vừa thêm file `.ts` mới ở repo root hoặc sửa `tsconfig.build.json`/`nest-cli.json`: chạy thật `npm run build && npm run start:prod` rồi curl thử 1 endpoint — `build` xanh và `test:e2e` xanh không chứng minh app boot được từ `dist/` (mục 17.6).
 - [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14. Đây là gate cục bộ, CI không chạy được (mục 14). **Đính kèm ảnh chụp kết quả sạch (0 errors) vào PR** trước khi gửi review — bắt buộc theo yêu cầu của mentor, không chỉ chạy xong là đủ.
 - [ ] Chạy `npm run lint:check` và `npm run format:check` (bản không `--fix`/`--write`, phủ **cả repo** chứ không chỉ `src`/`test`) — đây là bản CI thật sự chạy, không phải `lint`/`format` (mục 17.2).
 - [ ] Chạy `npm run build`, `npm run test:cov`, và `npm run test:e2e` — cả 3 đều pass; `test:cov` không được thấp hơn `coverageThreshold` (mục 20).
