@@ -7,7 +7,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 
 describe('UsersController', () => {
   let controller: UsersController;
-  let usersService: { updateWithAvatar: jest.Mock };
+  let usersService: { updateWithAvatar: jest.Mock; toResponseDto: jest.Mock };
 
   const currentUser = { id: 'user-id' } as User;
   const updatedUser = {
@@ -17,11 +17,15 @@ describe('UsersController', () => {
     bio: 'new bio',
     image: null,
   } as User;
+  const responseDto = {
+    user: { username: 'jake', email: 'jake@jake.jake', token: 'jwt-token' },
+  };
   const req = { token: 'jwt-token' } as Request & { token?: string };
 
   beforeEach(async () => {
     usersService = {
       updateWithAvatar: jest.fn().mockResolvedValue(updatedUser),
+      toResponseDto: jest.fn().mockReturnValue(responseDto),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -61,7 +65,7 @@ describe('UsersController', () => {
     );
   });
 
-  it('returns the updated user wrapped in UserResponseDto using the request token', async () => {
+  it('composes the response via UsersService.toResponseDto with the updated user and request token', async () => {
     const result = await controller.updateCurrentUser(
       currentUser,
       {},
@@ -69,21 +73,21 @@ describe('UsersController', () => {
       req,
     );
 
-    expect(result.user).toMatchObject({
-      username: 'jake',
-      email: 'jake@jake.jake',
-      token: 'jwt-token',
-    });
+    expect(usersService.toResponseDto).toHaveBeenCalledWith(
+      updatedUser,
+      'jwt-token',
+    );
+    expect(result).toBe(responseDto);
   });
 
   it('falls back to an empty token when the request has none', async () => {
-    const result = await controller.updateCurrentUser(
+    await controller.updateCurrentUser(
       currentUser,
       {},
       undefined,
       {} as Request & { token?: string },
     );
 
-    expect(result.user.token).toBe('');
+    expect(usersService.toResponseDto).toHaveBeenCalledWith(updatedUser, '');
   });
 });

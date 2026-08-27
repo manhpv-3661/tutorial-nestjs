@@ -140,6 +140,22 @@ describe('AuthService', () => {
     });
   });
 
+  describe('getCurrentUser', () => {
+    it('wraps the user and token into a UserResponseDto', () => {
+      const user = buildUser({ bio: 'hi' });
+
+      const dto = authService.getCurrentUser(user, 'jwt-token');
+
+      expect(dto.user).toEqual({
+        username: 'jake',
+        email: 'jake@jake.jake',
+        bio: 'hi',
+        image: null,
+        token: 'jwt-token',
+      });
+    });
+  });
+
   describe('logout', () => {
     it('blacklists the token for its remaining TTL', async () => {
       const nowSeconds = Math.floor(Date.now() / 1000);

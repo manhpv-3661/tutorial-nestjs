@@ -10,6 +10,7 @@ import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../../redis/redis.service';
 import { SALT_ROUNDS } from '../users/constants/users.constants';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -47,6 +48,10 @@ export class AuthService {
     }
 
     return UserResponseDto.fromEntity(user, this.signToken(user.id));
+  }
+
+  getCurrentUser(user: User, token: string): UserResponseDto {
+    return UserResponseDto.fromEntity(user, token);
   }
 
   async logout(token: string): Promise<void> {

@@ -49,6 +49,6 @@ export class AuthController {
     @CurrentUser() user: User,
     @Req() req: Request & { token?: string },
   ): UserResponseDto {
-    return UserResponseDto.fromEntity(user, req.token ?? '');
+    return this.authService.getCurrentUser(user, req.token ?? '');
   }
 }
