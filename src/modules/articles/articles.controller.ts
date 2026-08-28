@@ -36,7 +36,7 @@ export class ArticlesController {
     @CurrentUser() currentUser: User,
     @Body() dto: CreateArticleDto,
   ): Promise<ArticleResponseDto> {
-    const article = await this.articlesService.create(currentUser.id, {
+    const article = await this.articlesService.create(currentUser, {
       title: dto.title,
       description: dto.description,
       body: dto.body,
@@ -113,7 +113,9 @@ export class ArticlesController {
     @CurrentUser() currentUser: User,
   ): Promise<ArticleResponseDto> {
     const article = await this.articlesService.favorite(slug, currentUser.id);
-    return this.articlesService.toResponseDto(article, currentUser.id);
+    return this.articlesService.toResponseDto(article, currentUser.id, {
+      knownFavorited: true,
+    });
   }
 
   @ApiBearerAuth()
@@ -124,6 +126,8 @@ export class ArticlesController {
     @CurrentUser() currentUser: User,
   ): Promise<ArticleResponseDto> {
     const article = await this.articlesService.unfavorite(slug, currentUser.id);
-    return this.articlesService.toResponseDto(article, currentUser.id);
+    return this.articlesService.toResponseDto(article, currentUser.id, {
+      knownFavorited: false,
+    });
   }
 }

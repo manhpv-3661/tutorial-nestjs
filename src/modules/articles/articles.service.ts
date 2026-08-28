@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { isUniqueViolation } from '../../common/utils/postgres-unique-violation.util';
 import { FavoritesService } from '../favorites/favorites.service';
 import { FollowsService } from '../follows/follows.service';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { generateSlug } from './utils/slug.util';
 import { Article } from './entities/article.entity';
@@ -41,13 +42,13 @@ export class ArticlesService {
     private readonly favoritesService: FavoritesService,
   ) {}
 
-  async create(authorId: string, data: CreateArticleData): Promise<Article> {
+  async create(author: User, data: CreateArticleData): Promise<Article> {
     const article = this.articlesRepository.create({
       title: data.title,
       description: data.description,
       body: data.body,
       tagList: data.tagList,
-      authorId,
+      authorId: author.id,
       slug: generateSlug(data.title),
     });
 
@@ -56,7 +57,10 @@ export class ArticlesService {
     } catch (error) {
       throw this.toConflictOrRethrow(error);
     }
-    return this.findBySlugOrThrow(article.slug);
+    // The author is already the caller's own User entity — assign it
+    // directly instead of re-querying the row we just inserted.
+    article.author = author;
+    return article;
   }
 
   async findBySlugOrThrow(slug: string): Promise<Article> {
@@ -175,13 +179,18 @@ export class ArticlesService {
   async toResponseDto(
     article: Article,
     currentUserId?: string,
+    options?: { knownFavorited?: boolean },
   ): Promise<ArticleResponseDto> {
     const [favorited, favoritesCount, authorFollowing] = await Promise.all([
-      currentUserId
-        ? this.favoritesService.isFavorited(currentUserId, article.id)
-        : Promise.resolve(false),
+      options?.knownFavorited !== undefined
+        ? Promise.resolve(options.knownFavorited)
+        : currentUserId
+          ? this.favoritesService.isFavorited(currentUserId, article.id)
+          : Promise.resolve(false),
       this.favoritesService.countForArticle(article.id),
-      currentUserId
+      // A user can never follow themselves (enforced in FollowsService.follow),
+      // so skip the query entirely when the viewer is the article's own author.
+      currentUserId && currentUserId !== article.authorId
         ? this.followsService.isFollowing(currentUserId, article.authorId)
         : Promise.resolve(false),
     ]);

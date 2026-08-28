@@ -796,6 +796,10 @@ const authorFollowing =
 
 **Áp dụng chung cho 18.8/18.9:** trước khi thêm 1 query (re-fetch hoặc gọi service khác) ngay sau một thao tác ghi hoặc trong bước dựng response, tự hỏi: dữ liệu này có **chắc chắn** đã nằm trong tay (tham số đầu vào, kết quả của bước trước) hoặc **suy ra được** từ một bất biến đã biết (không thể tự follow chính mình) không? Nếu có, dùng thẳng, không hỏi lại DB.
 
+**Cùng pattern áp dụng luôn cho `ArticlesService` (không đợi review riêng mới sửa):** rà lại thấy `articles` có đúng 2 chỗ hình dạng giống hệt — `create()` cũng `save()` xong `findBySlugOrThrow()` lại chỉ để nạp `author` (đã có sẵn từ `@CurrentUser()`, sửa giống mục 18.8), và `toResponseDto()` cũng gọi `isFollowing(currentUserId, article.authorId)` vô điều kiện, tự hỏi self-follow khi tác giả xem/sửa bài viết của chính mình (sửa giống mục 18.9). Thêm 1 trường hợp mới không có ở comments: `favorite()`/`unfavorite()` gọi `toResponseDto()` ngay sau khi favorite/unfavorite thành công, nhưng `toResponseDto()` lại tự hỏi lại `isFavorited()` — trong khi kết quả **chắc chắn** đã biết (favorite thành công → `favorited: true`, unfavorite thành công → `favorited: false`). Vì `toResponseDto()` dùng chung cho nhiều endpoint (create/get/update/favorite/unfavorite) nên không thể đổi mặc định — thêm tham số `options?: { knownFavorited?: boolean }` (cùng khuôn với `toListResponseDto`'s `allAuthorsFollowed` ở mục 18.3), chỉ 2 call site `favorite`/`unfavorite` truyền vào, các call site còn lại vẫn query như cũ.
+
+**Áp dụng mở rộng:** khi 1 method dựng response được gọi ngay sau 1 thao tác ghi mà chính thao tác đó đã xác định chắc chắn 1 trong các field của response (favorited sau favorite/unfavorite, following sau follow/unfollow...), truyền field đó xuống qua tham số `options` thay vì để method dựng response tự hỏi lại — đừng chỉ sửa đúng chỗ reviewer chỉ ra, tìm luôn những chỗ cùng hình dạng trong các module khác.
+
 ---
 
 ## 19. Swagger — Endpoint mới phải khai `@ApiOperation` + `@ApiResponse` cho lỗi
