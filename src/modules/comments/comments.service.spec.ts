@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
 import { FollowsService } from '../follows/follows.service';
+import { User } from '../users/entities/user.entity';
 import { Comment } from './entities/comment.entity';
 import { CommentsService } from './comments.service';
 
@@ -17,7 +18,12 @@ describe('CommentsService', () => {
   };
   let followsService: { isFollowing: jest.Mock; getFollowingIds: jest.Mock };
 
-  const author = { id: 'author-id', username: 'jake', bio: null, image: null };
+  const author = {
+    id: 'author-id',
+    username: 'jake',
+    bio: null,
+    image: null,
+  } as User;
 
   beforeEach(async () => {
     repository = {
@@ -45,16 +51,8 @@ describe('CommentsService', () => {
   });
 
   describe('create', () => {
-    it('saves the comment and returns it with the author loaded', async () => {
-      repository.findOne.mockResolvedValue({
-        id: 'comment-id',
-        body: 'nice article',
-        articleId: 'article-id',
-        authorId: 'author-id',
-        author,
-      });
-
-      const comment = await commentsService.create('article-id', 'author-id', {
+    it('saves the comment and attaches the given author without re-querying it', async () => {
+      const comment = await commentsService.create('article-id', author, {
         body: 'nice article',
       });
 
@@ -65,38 +63,26 @@ describe('CommentsService', () => {
       expect(savedComment.articleId).toBe('article-id');
       expect(savedComment.authorId).toBe('author-id');
       expect(comment.body).toBe('nice article');
-    });
-  });
-
-  describe('findByIdOrThrow', () => {
-    it('returns the comment when found', async () => {
-      const comment = { id: 'comment-id', body: 'b', author };
-      repository.findOne.mockResolvedValue(comment);
-
-      await expect(
-        commentsService.findByIdOrThrow('comment-id'),
-      ).resolves.toEqual(comment);
-    });
-
-    it('throws NotFoundException when no comment matches', async () => {
-      repository.findOne.mockResolvedValue(null);
-
-      await expect(
-        commentsService.findByIdOrThrow('ghost'),
-      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(comment.author).toBe(author);
+      expect(repository.findOne).not.toHaveBeenCalled();
     });
   });
 
   describe('listByArticle', () => {
-    it('returns comments ordered oldest first', async () => {
+    it('applies the pagination filter and returns comments ordered oldest first', async () => {
       repository.find.mockResolvedValue([{ id: 'comment-1' }]);
 
-      const comments = await commentsService.listByArticle('article-id');
+      const comments = await commentsService.listByArticle('article-id', {
+        limit: 20,
+        offset: 0,
+      });
 
       expect(repository.find).toHaveBeenCalledWith({
         where: { articleId: 'article-id' },
         relations: ['author'],
         order: { createdAt: 'ASC' },
+        skip: 0,
+        take: 20,
       });
       expect(comments).toEqual([{ id: 'comment-1' }]);
     });
@@ -167,7 +153,23 @@ describe('CommentsService', () => {
       expect(followsService.isFollowing).not.toHaveBeenCalled();
     });
 
-    it('reports the real following state for a logged-in viewer', async () => {
+    it('reports following=false without querying when the viewer is the comment author', async () => {
+      const comment = {
+        id: 'comment-id',
+        body: 'b',
+        authorId: 'author-id',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        author,
+      } as unknown as Comment;
+
+      const dto = await commentsService.toResponseDto(comment, 'author-id');
+
+      expect(dto.comment.author.following).toBe(false);
+      expect(followsService.isFollowing).not.toHaveBeenCalled();
+    });
+
+    it('reports the real following state for a different logged-in viewer', async () => {
       followsService.isFollowing.mockResolvedValue(true);
       const comment = {
         id: 'comment-id',

@@ -8,6 +8,7 @@
   "MIN_LENGTH_TITLE": "Title must not be empty",
   "MIN_LENGTH_DESCRIPTION": "Description must not be empty",
   "MIN_LENGTH_BODY": "Body must not be empty",
+  "MAX_LENGTH_COMMENT_BODY": "Comment must not exceed 5000 characters",
   "MIN_LIMIT": "Limit must be at least 1",
   "MAX_LIMIT": "Limit must not exceed 100",
   "MIN_OFFSET": "Offset must not be negative"

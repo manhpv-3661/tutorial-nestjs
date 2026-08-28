@@ -55,6 +55,32 @@ describe('Comments flow (e2e)', () => {
       .expect(404);
   });
 
+  it('rejects an empty comment body with 400', async () => {
+    const author = await registerUser(app);
+    const article = await createArticle(author.token);
+
+    const res = await request(app.getHttpServer())
+      .post(`/articles/${article.slug}/comments`)
+      .set('Authorization', `Bearer ${author.token}`)
+      .send({ body: '' })
+      .expect(400);
+
+    expect(res.body).toHaveProperty('errors.body');
+  });
+
+  it('rejects a whitespace-only comment body with 400', async () => {
+    const author = await registerUser(app);
+    const article = await createArticle(author.token);
+
+    const res = await request(app.getHttpServer())
+      .post(`/articles/${article.slug}/comments`)
+      .set('Authorization', `Bearer ${author.token}`)
+      .send({ body: '   \n\t  ' })
+      .expect(400);
+
+    expect(res.body).toHaveProperty('errors.body');
+  });
+
   it('adds a comment and returns it with the author profile', async () => {
     const author = await registerUser(app);
     const commenter = await registerUser(app);
@@ -103,6 +129,35 @@ describe('Comments flow (e2e)', () => {
       'second comment',
     ]);
     expect(anonComments[0].author.following).toBe(false);
+  });
+
+  it('paginates the comments list with limit/offset', async () => {
+    const author = await registerUser(app);
+    const article = await createArticle(author.token);
+
+    for (const body of ['first', 'second', 'third']) {
+      await request(app.getHttpServer())
+        .post(`/articles/${article.slug}/comments`)
+        .set('Authorization', `Bearer ${author.token}`)
+        .send({ body })
+        .expect(201);
+    }
+
+    const firstPage = await request(app.getHttpServer())
+      .get(`/articles/${article.slug}/comments`)
+      .query({ limit: 2, offset: 0 })
+      .expect(200);
+    expect(
+      (firstPage.body as CommentsListResponseDto).comments.map((c) => c.body),
+    ).toEqual(['first', 'second']);
+
+    const secondPage = await request(app.getHttpServer())
+      .get(`/articles/${article.slug}/comments`)
+      .query({ limit: 2, offset: 2 })
+      .expect(200);
+    expect(
+      (secondPage.body as CommentsListResponseDto).comments.map((c) => c.body),
+    ).toEqual(['third']);
   });
 
   it('delete requires authentication', async () => {

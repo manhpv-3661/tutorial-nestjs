@@ -7,11 +7,13 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ArticlesService } from '../articles/articles.service';
+import { PaginationQueryDto } from '../articles/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { User } from '../users/entities/user.entity';
@@ -37,11 +39,9 @@ export class CommentsController {
     @Body() dto: CreateCommentDto,
   ): Promise<CommentResponseDto> {
     const article = await this.articlesService.findBySlugOrThrow(slug);
-    const comment = await this.commentsService.create(
-      article.id,
-      currentUser.id,
-      { body: dto.body },
-    );
+    const comment = await this.commentsService.create(article.id, currentUser, {
+      body: dto.body,
+    });
     return this.commentsService.toResponseDto(comment, currentUser.id);
   }
 
@@ -49,10 +49,14 @@ export class CommentsController {
   @Get()
   async list(
     @Param('slug') slug: string,
+    @Query() query: PaginationQueryDto,
     @CurrentUser() currentUser: User | null,
   ): Promise<CommentsListResponseDto> {
     const article = await this.articlesService.findBySlugOrThrow(slug);
-    const comments = await this.commentsService.listByArticle(article.id);
+    const comments = await this.commentsService.listByArticle(
+      article.id,
+      query,
+    );
     return this.commentsService.toListResponseDto(comments, currentUser?.id);
   }
 
