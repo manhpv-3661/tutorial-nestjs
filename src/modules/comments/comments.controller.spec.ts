@@ -52,7 +52,7 @@ describe('CommentsController', () => {
     expect(articlesService.findBySlugOrThrow).toHaveBeenCalledWith('a-slug');
     expect(commentsService.create).toHaveBeenCalledWith(
       'article-id',
-      'current-id',
+      currentUser,
       { body: 'nice article' },
     );
     expect(commentsService.toResponseDto).toHaveBeenCalledWith(
@@ -62,11 +62,15 @@ describe('CommentsController', () => {
     expect(result).toBe(commentResponse);
   });
 
-  it('list resolves the article by slug and delegates with the viewer id when present', async () => {
-    const result = await controller.list('a-slug', currentUser);
+  it('list resolves the article by slug and delegates with the pagination filter and viewer id when present', async () => {
+    const query = { limit: 20, offset: 0 };
+    const result = await controller.list('a-slug', query, currentUser);
 
     expect(articlesService.findBySlugOrThrow).toHaveBeenCalledWith('a-slug');
-    expect(commentsService.listByArticle).toHaveBeenCalledWith('article-id');
+    expect(commentsService.listByArticle).toHaveBeenCalledWith(
+      'article-id',
+      query,
+    );
     expect(commentsService.toListResponseDto).toHaveBeenCalledWith(
       [comment],
       'current-id',
@@ -75,7 +79,7 @@ describe('CommentsController', () => {
   });
 
   it('list delegates with undefined viewer id for anonymous requests', async () => {
-    await controller.list('a-slug', null);
+    await controller.list('a-slug', { limit: 20, offset: 0 }, null);
 
     expect(commentsService.toListResponseDto).toHaveBeenCalledWith(
       [comment],

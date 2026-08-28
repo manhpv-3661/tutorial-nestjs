@@ -694,7 +694,7 @@ query.andWhere(
 
 **Rule:** trước khi thêm 1 list endpoint mới (hoặc method service trả về mảng không giới hạn), tự hỏi bảng nguồn có thể tăng không giới hạn theo thời gian/theo hành vi user không (khác với quan hệ 1-owner-vài-bản-ghi như attachment/avatar). Nếu có, endpoint phải nhận `limit`/`offset` — tái sử dụng `PaginationQueryDto` đã có ở `articles`, không tự chế lại. Nếu cố tình bỏ pagination vì lý do spec/UX, phải ghi rõ lý do bằng comment WHY ngay tại chỗ khai method (mục 13), không im lặng bỏ qua.
 
-**Ví dụ đã biết, chưa sửa — `CommentsService.listByArticle()`:** hiện fetch **toàn bộ** comment của 1 article, không giới hạn. Đây khớp đúng RealWorld spec gốc (comment không phân trang) nên là quyết định có chủ đích, nhưng có cùng hình dạng "tăng không giới hạn" như lỗi vừa sửa ở mục 18.2 cho `articles`: một bài viral có hàng chục nghìn comment sẽ kéo hết về cùng lúc trong 1 query. Đã ghi lại lý do bằng comment WHY tại chỗ thay vì âm thầm bỏ qua — xem `comments.service.ts`.
+**Ví dụ đã sửa — `CommentsService.listByArticle()`:** ban đầu fetch **toàn bộ** comment của 1 article, không giới hạn, với lý do "khớp RealWorld spec gốc (comment không phân trang)" ghi lại bằng comment WHY tại chỗ. Mentor review PR5 (binhpt-3177) không chấp nhận lý do này — spec không phân trang không có nghĩa là bảng nguồn không thể tăng không giới hạn, và hình dạng lỗi giống hệt mục 18.2: một bài viral hàng chục nghìn comment vẫn kéo hết về 1 query. Đã sửa: nhận `PaginationQueryDto` (tái sử dụng từ `articles`, đúng theo rule dưới đây) và `skip`/`take` trong query, xoá comment WHY vì lý do đó không còn đúng nữa. Bài học: một quyết định "cố ý, có ghi lý do" trong code vẫn phải nhường khi review thật (không phải chỉ tự-review) chỉ ra lý do đó không đứng vững.
 
 **Áp dụng:** khi thêm list endpoint mới, mặc định thêm `PaginationQueryDto`. Nếu quyết định không phân trang, dòng comment WHY tại chỗ khai method là bắt buộc, không phải tuỳ chọn.
 
@@ -761,6 +761,40 @@ return articles.map((article) =>
 **Vì sao:** trước khi thêm rule này, `src/config/typeorm.config.ts` hoàn toàn không có `extra` — nghĩa là chạy 100% theo default ngầm của driver `pg`: pool tối đa 10 connection, và **không có statement timeout nào cả**. Không có statement timeout là rủi ro thật: 1 câu query treo/chạy runaway (bug logic, hoặc query bị khoá do lock chờ) sẽ giữ nguyên 1 connection trong pool vô thời hạn, dần dần rút cạn pool cho tới khi request khác không lấy được connection nữa — mà không có gì báo lỗi rõ ràng tại thời điểm đó.
 
 **Áp dụng:** `extra: { max: 10, statement_timeout: 10_000 }` trong `buildDataSourceOptions()` (dùng chung cho `data-source.ts` và app runtime, xem mục 17.3) — `max` giữ nguyên giá trị default (không đổi hành vi, chỉ khai tường minh để đây là quyết định có chủ đích), `statement_timeout` 10s đủ dư cho mọi query hiện tại của app (lookup đơn/list phân trang) nhưng chặn được query treo vô hạn. Nếu sau này có query hợp lệ cần lâu hơn 10s (vd migration trên bảng lớn), tăng giá trị này kèm ghi lý do, không xoá bỏ timeout.
+
+**18.8 — Sau khi `save()`/`insert()`, không query lại dữ liệu đã có sẵn trong tay chỉ để dựng response.**
+
+**Sai:** `CommentsService.create()` insert xong rồi gọi lại `findByIdOrThrow(comment.id)` — thêm 2 query (`SELECT DISTINCT` + `SELECT ... JOIN author`) chỉ để nạp lại quan hệ `author`, trong khi `author` chính là `User` đang gọi request (đã có sẵn từ `@CurrentUser()`/guard, không cần hỏi lại DB).
+
+**Đúng:**
+
+```typescript
+async create(articleId: string, author: User, data: CreateCommentData): Promise<Comment> {
+  const comment = this.commentsRepository.create({ body: data.body, articleId, authorId: author.id });
+  await this.commentsRepository.save(comment);
+  comment.author = author; // đã có sẵn, không re-fetch
+  return comment;
+}
+```
+
+**Vì sao:** Mentor review PR5 (binhpt-3177) đo bằng query log: `POST /comments` tốn 9 query, trong đó riêng cặp re-fetch này chiếm 2 query oan — không phải do TypeORM bắt buộc, mà do code tự đi hỏi lại một sự thật đã biết.
+
+**18.9 — Không tự query lại một quan hệ mà điều kiện đã biết trước kết quả (self-relationship).**
+
+**Sai:** `CommentsService.toResponseDto()` gọi `followsService.isFollowing(currentUserId, comment.authorId)` vô điều kiện mỗi khi có `currentUserId` — kể cả khi `currentUserId === comment.authorId` (tác giả tự xem comment của chính mình). Một user không bao giờ follow được chính mình (`FollowsService.follow()` chặn bằng `ConflictException`), nên kết quả **luôn** là `false`, tốn 1 query để hỏi một câu đã biết sẵn câu trả lời.
+
+**Đúng:**
+
+```typescript
+const authorFollowing =
+  currentUserId && currentUserId !== comment.authorId
+    ? await this.followsService.isFollowing(currentUserId, comment.authorId)
+    : false;
+```
+
+**Vì sao:** cùng một mentor review, cùng phép đo — đây là query thứ 9/9 trong log ban đầu (`SELECT follows ← isFollowing(me, me)`). Sau 2 fix ở mục 18.8 và mục này, `POST /comments` còn đúng 6 query (đo lại bằng cách gắn `DataSource.logger` tuỳ chỉnh trong e2e test, xem cách đo ở PR review reply).
+
+**Áp dụng chung cho 18.8/18.9:** trước khi thêm 1 query (re-fetch hoặc gọi service khác) ngay sau một thao tác ghi hoặc trong bước dựng response, tự hỏi: dữ liệu này có **chắc chắn** đã nằm trong tay (tham số đầu vào, kết quả của bước trước) hoặc **suy ra được** từ một bất biến đã biết (không thể tự follow chính mình) không? Nếu có, dùng thẳng, không hỏi lại DB.
 
 ---
 
@@ -829,6 +863,10 @@ async favorite(
 
 **Áp dụng:** `MAX_TITLE_LENGTH`/`MAX_DESCRIPTION_LENGTH`/`MAX_BODY_LENGTH` (`articles.constants.ts`), `MAX_BODY_LENGTH` (`comments.constants.ts`) — mỗi module tự định nghĩa hằng số riêng theo đúng mục 12 (constant thuộc domain nào nằm trong `constants/` của module đó), không dùng chung 1 hằng số toàn cục cho mọi loại field.
 
+**`@MinLength(1)` không chặn được chuỗi toàn khoảng trắng.** Mentor review PR5 (binhpt-3177) chỉ ra: `"   "` (toàn dấu cách) có `length` là 3, vượt qua `@MinLength(1)` dù về nội dung thực chất là rỗng. Đã sửa `CreateCommentDto.body` bằng `@Matches(/\S/, {...})` thay cho `@MinLength(1)` — `\S` đòi hỏi ít nhất 1 ký tự không-phải-khoảng-trắng ở bất kỳ đâu trong chuỗi, chặn được cả `""` lẫn chuỗi toàn whitespace mà không cần 2 decorator chồng nhau.
+
+**Áp dụng:** field free-text nào chỉ có `@MinLength(1)` để chặn "không được rỗng" (title/description/body/comment...) nên đổi sang `@Matches(/\S/, {...})` để chặn luôn trường hợp toàn khoảng trắng — không chỉ riêng comment, đây là cùng một lỗ hổng hình dạng, cần rà lại mọi nơi đang dùng `@MinLength(1)` với cùng mục đích.
+
 ---
 
 ## 22. Checklist trước khi tạo PR
@@ -862,6 +900,7 @@ async favorite(
 - [ ] Method chỉ trả `boolean` cho câu hỏi tồn tại dùng `repository.exists()`, không `findOne()` + so `null` (mục 18.5).
 - [ ] Ghép dữ liệu quan hệ cho 1 danh sách bản ghi dùng batch `getXxxIds`/`getXxxCountMap` gọi 1 lần, không lặp gọi method single-item bên trong vòng lặp/`.map()` (mục 18.6).
 - [ ] `DataSourceOptions.extra` có khai `max`/`statement_timeout` tường minh, không để trống dựa vào default driver (mục 18.7).
-- [ ] Field free-text (title/description/body/comment...) có `@MaxLength` lấy từ constant của module, không chỉ `@MinLength` (mục 21).
+- [ ] Field free-text (title/description/body/comment...) có `@MaxLength` lấy từ constant của module; dùng `@Matches(/\S/, ...)` thay vì `@MinLength(1)` để chặn cả chuỗi toàn khoảng trắng (mục 21).
+- [ ] Sau `save()`/`insert()`, không re-fetch dữ liệu đã có sẵn trong tay chỉ để dựng response; không tự query lại một quan hệ mà điều kiện đã biết trước kết quả (vd self-follow) (mục 18.8, 18.9).
 - [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
 - [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).

@@ -6,7 +6,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { I18nService } from 'nestjs-i18n';
 import { Repository } from 'typeorm';
+import { PaginationQueryDto } from '../articles/dto/pagination-query.dto';
 import { FollowsService } from '../follows/follows.service';
+import { User } from '../users/entities/user.entity';
 import { Comment } from './entities/comment.entity';
 import {
   CommentResponseDto,
@@ -26,37 +28,31 @@ export class CommentsService {
 
   async create(
     articleId: string,
-    authorId: string,
+    author: User,
     data: CreateCommentData,
   ): Promise<Comment> {
     const comment = this.commentsRepository.create({
       body: data.body,
       articleId,
-      authorId,
+      authorId: author.id,
     });
     await this.commentsRepository.save(comment);
-    return this.findByIdOrThrow(comment.id);
-  }
-
-  async findByIdOrThrow(id: string): Promise<Comment> {
-    const comment = await this.commentsRepository.findOne({
-      where: { id },
-      relations: ['author'],
-    });
-    if (!comment) {
-      throw new NotFoundException(this.i18n.t('errors.commentNotFound'));
-    }
+    // The author is already the caller's own User entity — assign it
+    // directly instead of re-querying the row we just inserted.
+    comment.author = author;
     return comment;
   }
 
-  async listByArticle(articleId: string): Promise<Comment[]> {
-    // Intentionally unpaginated: matches the RealWorld spec, which does not
-    // paginate comments. Fetches every comment for the article, so a viral
-    // article with tens of thousands of comments pulls them all in one query.
+  async listByArticle(
+    articleId: string,
+    pagination: PaginationQueryDto,
+  ): Promise<Comment[]> {
     return this.commentsRepository.find({
       where: { articleId },
       relations: ['author'],
       order: { createdAt: 'ASC' },
+      skip: pagination.offset,
+      take: pagination.limit,
     });
   }
 
@@ -81,9 +77,12 @@ export class CommentsService {
     comment: Comment,
     currentUserId?: string,
   ): Promise<CommentResponseDto> {
-    const authorFollowing = currentUserId
-      ? await this.followsService.isFollowing(currentUserId, comment.authorId)
-      : false;
+    // A user can never follow themselves (enforced in FollowsService.follow),
+    // so skip the query entirely when the viewer is the comment's own author.
+    const authorFollowing =
+      currentUserId && currentUserId !== comment.authorId
+        ? await this.followsService.isFollowing(currentUserId, comment.authorId)
+        : false;
     const meta: CommentResponseMeta = { authorFollowing };
     return CommentResponseDto.fromEntity(comment, meta);
   }
