@@ -3,8 +3,8 @@ import {
   IsArray,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 import { i18nValidationMessage } from 'nestjs-i18n';
 import {
@@ -16,7 +16,7 @@ import {
 export class CreateArticleDto {
   @ApiProperty()
   @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
-  @MinLength(1, {
+  @Matches(/\S/, {
     message: i18nValidationMessage('validation.MIN_LENGTH_TITLE'),
   })
   @MaxLength(MAX_TITLE_LENGTH, {
@@ -26,7 +26,7 @@ export class CreateArticleDto {
 
   @ApiProperty()
   @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
-  @MinLength(1, {
+  @Matches(/\S/, {
     message: i18nValidationMessage('validation.MIN_LENGTH_DESCRIPTION'),
   })
   @MaxLength(MAX_DESCRIPTION_LENGTH, {
@@ -36,7 +36,7 @@ export class CreateArticleDto {
 
   @ApiProperty()
   @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
-  @MinLength(1, {
+  @Matches(/\S/, {
     message: i18nValidationMessage('validation.MIN_LENGTH_BODY'),
   })
   @MaxLength(MAX_BODY_LENGTH, {

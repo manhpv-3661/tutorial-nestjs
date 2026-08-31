@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { i18nValidationMessage } from 'nestjs-i18n';
 import {
   MAX_BODY_LENGTH,
@@ -11,7 +11,7 @@ export class UpdateArticleDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
-  @MinLength(1, {
+  @Matches(/\S/, {
     message: i18nValidationMessage('validation.MIN_LENGTH_TITLE'),
   })
   @MaxLength(MAX_TITLE_LENGTH, {
@@ -22,7 +22,7 @@ export class UpdateArticleDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
-  @MinLength(1, {
+  @Matches(/\S/, {
     message: i18nValidationMessage('validation.MIN_LENGTH_DESCRIPTION'),
   })
   @MaxLength(MAX_DESCRIPTION_LENGTH, {
@@ -33,7 +33,7 @@ export class UpdateArticleDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
-  @MinLength(1, {
+  @Matches(/\S/, {
     message: i18nValidationMessage('validation.MIN_LENGTH_BODY'),
   })
   @MaxLength(MAX_BODY_LENGTH, {
