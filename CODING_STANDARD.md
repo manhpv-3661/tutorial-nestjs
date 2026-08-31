@@ -760,7 +760,9 @@ return articles.map((article) =>
 
 **Vì sao:** trước khi thêm rule này, `src/config/typeorm.config.ts` hoàn toàn không có `extra` — nghĩa là chạy 100% theo default ngầm của driver `pg`: pool tối đa 10 connection, và **không có statement timeout nào cả**. Không có statement timeout là rủi ro thật: 1 câu query treo/chạy runaway (bug logic, hoặc query bị khoá do lock chờ) sẽ giữ nguyên 1 connection trong pool vô thời hạn, dần dần rút cạn pool cho tới khi request khác không lấy được connection nữa — mà không có gì báo lỗi rõ ràng tại thời điểm đó.
 
-**Áp dụng:** `extra: { max: 10, statement_timeout: 10_000 }` trong `buildDataSourceOptions()` (dùng chung cho `data-source.ts` và app runtime, xem mục 17.3) — `max` giữ nguyên giá trị default (không đổi hành vi, chỉ khai tường minh để đây là quyết định có chủ đích), `statement_timeout` 10s đủ dư cho mọi query hiện tại của app (lookup đơn/list phân trang) nhưng chặn được query treo vô hạn. Nếu sau này có query hợp lệ cần lâu hơn 10s (vd migration trên bảng lớn), tăng giá trị này kèm ghi lý do, không xoá bỏ timeout.
+**Áp dụng:** `extra: { max: 10, statement_timeout: 10_000 }` trong `buildDataSourceOptions()` cho **app runtime** — `max` giữ nguyên giá trị default (không đổi hành vi, chỉ khai tường minh để đây là quyết định có chủ đích), `statement_timeout` 10s đủ dư cho mọi query hiện tại của app (lookup đơn/list phân trang) nhưng chặn được query treo vô hạn.
+
+**Không áp timeout này cho migration runner.** `buildDataSourceOptions()` nhận tham số thứ 2 `{ forMigrations?: boolean }` — `data-source.ts`/`data-source.test.ts` (dùng cho `migration:run`/`migration:run:test`, chạy 1 lần qua CLI, không phải pool phục vụ request liên tục) truyền `{ forMigrations: true }` để bỏ hẳn `extra`, không kế thừa `statement_timeout: 10_000` của app runtime. Lý do: rule này ban đầu dùng chung 1 `extra` cho cả 2 loại DataSource — nếu sau này có 1 migration hợp lệ chạy lâu hơn 10s (vd backfill 1 cột NOT NULL trên bảng đã có nhiều dữ liệu, tạo index không dùng `CONCURRENTLY`), Postgres sẽ tự huỷ giữa chừng với lỗi `canceling statement due to statement timeout`, làm hỏng `migration:run` mà không liên quan gì tới rule này đang bảo vệ app khỏi query treo. Nếu 1 migration thật sự cần chạy lâu, thêm `statement_timeout` riêng ngay trong file migration đó (`SET statement_timeout = 0` hoặc giá trị cụ thể) thay vì nới rule chung.
 
 **18.8 — Sau khi `save()`/`insert()`, không query lại dữ liệu đã có sẵn trong tay chỉ để dựng response.**
 
@@ -845,7 +847,7 @@ async favorite(
 }
 ```
 
-**Áp dụng:** khi thêm route mới, liệt kê trước các exception mà service phía dưới thực sự throw (đọc thẳng service, không đoán), rồi khai đúng từng `@ApiResponse`. Route hiện có trong repo (từ PR1-PR6) **chưa** được retrofit theo rule này — áp dụng dần khi route đó được sửa/chạm tới, không cần làm 1 lượt riêng.
+**Áp dụng:** khi thêm route mới, liệt kê trước các exception mà service phía dưới thực sự throw (đọc thẳng service, không đoán), rồi khai đúng từng `@ApiResponse`. Route hiện có trong repo (từ PR1-PR6) phần lớn **chưa** được retrofit theo rule này — áp dụng dần khi route đó được sửa/chạm tới, không cần làm 1 lượt riêng. `CommentsController` (`create`/`list`/`delete`) là ví dụ retrofit đầu tiên, làm ngay khi `list()` bị sửa (thêm pagination) trong PR6 — đúng tinh thần "sửa tới đâu, khai tới đó" của rule này.
 
 ---
 
@@ -867,9 +869,9 @@ async favorite(
 
 **Áp dụng:** `MAX_TITLE_LENGTH`/`MAX_DESCRIPTION_LENGTH`/`MAX_BODY_LENGTH` (`articles.constants.ts`), `MAX_BODY_LENGTH` (`comments.constants.ts`) — mỗi module tự định nghĩa hằng số riêng theo đúng mục 12 (constant thuộc domain nào nằm trong `constants/` của module đó), không dùng chung 1 hằng số toàn cục cho mọi loại field.
 
-**`@MinLength(1)` không chặn được chuỗi toàn khoảng trắng.** Mentor review PR5 (binhpt-3177) chỉ ra: `"   "` (toàn dấu cách) có `length` là 3, vượt qua `@MinLength(1)` dù về nội dung thực chất là rỗng. Đã sửa `CreateCommentDto.body` bằng `@Matches(/\S/, {...})` thay cho `@MinLength(1)` — `\S` đòi hỏi ít nhất 1 ký tự không-phải-khoảng-trắng ở bất kỳ đâu trong chuỗi, chặn được cả `""` lẫn chuỗi toàn whitespace mà không cần 2 decorator chồng nhau.
+**`@MinLength(1)` không chặn được chuỗi toàn khoảng trắng.** Mentor review PR5 (binhpt-3177) chỉ ra: `"   "` (toàn dấu cách) có `length` là 3, vượt qua `@MinLength(1)` dù về nội dung thực chất là rỗng. Đã sửa `CreateCommentDto.body` bằng `@Matches(/\S/, {...})` thay cho `@MinLength(1)` — `\S` đòi hỏi ít nhất 1 ký tự không-phải-khoảng-trắng ở bất kỳ đâu trong chuỗi, chặn được cả `""` lẫn chuỗi toàn whitespace mà không cần 2 decorator chồng nhau. Rà lại thấy `CreateArticleDto`/`UpdateArticleDto` (`title`/`description`/`body`) có cùng lỗ hổng — đã sửa đồng loạt sang `@Matches(/\S/, {...})`, không đợi review riêng.
 
-**Áp dụng:** field free-text nào chỉ có `@MinLength(1)` để chặn "không được rỗng" (title/description/body/comment...) nên đổi sang `@Matches(/\S/, {...})` để chặn luôn trường hợp toàn khoảng trắng — không chỉ riêng comment, đây là cùng một lỗ hổng hình dạng, cần rà lại mọi nơi đang dùng `@MinLength(1)` với cùng mục đích.
+**Áp dụng:** field free-text nào chỉ có `@MinLength(1)` để chặn "không được rỗng" (title/description/body/comment...) phải dùng `@Matches(/\S/, {...})` thay vì `@MinLength(1)` để chặn luôn trường hợp toàn khoảng trắng — áp dụng cho **mọi** field free-text trong repo, không chỉ chỗ reviewer vừa chỉ ra.
 
 ---
 
