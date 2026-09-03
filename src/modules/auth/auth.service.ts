@@ -38,7 +38,7 @@ export class AuthService {
       password: hashedPassword,
     });
 
-    return UserResponseDto.fromEntity(user, this.signToken(user.id));
+    return this.usersService.toResponseDto(user, this.signToken(user.id));
   }
 
   async login(dto: LoginDto): Promise<UserResponseDto> {
@@ -47,11 +47,11 @@ export class AuthService {
       throw new UnauthorizedException(this.i18n.t('errors.invalidCredentials'));
     }
 
-    return UserResponseDto.fromEntity(user, this.signToken(user.id));
+    return this.usersService.toResponseDto(user, this.signToken(user.id));
   }
 
   getCurrentUser(user: User, token: string): UserResponseDto {
-    return UserResponseDto.fromEntity(user, token);
+    return this.usersService.toResponseDto(user, token);
   }
 
   async logout(token: string): Promise<void> {
