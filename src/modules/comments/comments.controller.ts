@@ -69,6 +69,10 @@ export class CommentsController {
     description: 'Invalid limit/offset',
   })
   @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Bearer token provided but invalid or blacklisted',
+  })
+  @ApiResponse({
     status: HttpStatus.NOT_FOUND,
     description: 'Article not found',
   })
