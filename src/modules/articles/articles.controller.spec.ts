@@ -62,6 +62,7 @@ describe('ArticlesController', () => {
     expect(articlesService.toResponseDto).toHaveBeenCalledWith(
       article,
       'current-id',
+      { knownFavorited: false },
     );
     expect(result).toBe(articleResponse);
   });

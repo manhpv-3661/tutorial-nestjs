@@ -42,7 +42,9 @@ export class ArticlesController {
       body: dto.body,
       tagList: dto.tagList ?? [],
     });
-    return this.articlesService.toResponseDto(article, currentUser.id);
+    return this.articlesService.toResponseDto(article, currentUser.id, {
+      knownFavorited: false,
+    });
   }
 
   @UseGuards(OptionalJwtAuthGuard)
