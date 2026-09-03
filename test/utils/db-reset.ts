@@ -2,12 +2,12 @@ import { DataSource } from 'typeorm';
 
 function assertIsTestDatabase(dataSource: DataSource): void {
   const database = (dataSource.options as { database?: string }).database;
-  if (!database?.includes('test')) {
+  if (!database?.endsWith('_test')) {
     throw new Error(
       `Refusing to truncate database "${String(database)}" - its name does not ` +
-        'contain "test". This guard exists so the e2e suite cannot wipe a real ' +
-        'dev/prod database if a DB_NAME env var leaks in from the shell instead ' +
-        'of .env.test.',
+        'end with "_test", the convention used by .env.test\'s DB_NAME. This ' +
+        'guard exists so the e2e suite cannot wipe a real dev/prod database if ' +
+        'a DB_NAME env var leaks in from the shell instead of .env.test.',
     );
   }
 }

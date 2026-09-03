@@ -8,8 +8,14 @@ export const SEED_USERS = [
   { username: 'seed_bob', email: 'seed_bob@example.com' },
 ];
 
+// The seed password is a fixed constant, so its hash never changes across
+// the ~50+ e2e test cases that call seedDatabase() in a global beforeEach -
+// compute it once per process instead of re-hashing on every test.
+let cachedPasswordHash: Promise<string> | undefined;
+
 export async function seedDatabase(dataSource: DataSource): Promise<void> {
-  const password = await bcrypt.hash('seed-password-123', SALT_ROUNDS);
+  cachedPasswordHash ??= bcrypt.hash('seed-password-123', SALT_ROUNDS);
+  const password = await cachedPasswordHash;
   await dataSource.getRepository(User).insert(
     SEED_USERS.map((seedUser) => ({
       username: seedUser.username,
