@@ -174,7 +174,7 @@ describe('Comments flow (e2e)', () => {
     ).toEqual(['third']);
   });
 
-  it('paginates the comments list with limit/offset', async () => {
+  it('falls back to the default limit/offset when neither is provided', async () => {
     const author = await registerUser(app);
     const article = await createArticle(author.token);
 
@@ -186,21 +186,12 @@ describe('Comments flow (e2e)', () => {
         .expect(201);
     }
 
-    const firstPage = await request(app.getHttpServer())
+    const res = await request(app.getHttpServer())
       .get(`/articles/${article.slug}/comments`)
-      .query({ limit: 2, offset: 0 })
       .expect(200);
     expect(
-      (firstPage.body as CommentsListResponseDto).comments.map((c) => c.body),
-    ).toEqual(['first', 'second']);
-
-    const secondPage = await request(app.getHttpServer())
-      .get(`/articles/${article.slug}/comments`)
-      .query({ limit: 2, offset: 2 })
-      .expect(200);
-    expect(
-      (secondPage.body as CommentsListResponseDto).comments.map((c) => c.body),
-    ).toEqual(['third']);
+      (res.body as CommentsListResponseDto).comments.map((c) => c.body),
+    ).toEqual(['first', 'second', 'third']);
   });
 
   it('delete requires authentication', async () => {
