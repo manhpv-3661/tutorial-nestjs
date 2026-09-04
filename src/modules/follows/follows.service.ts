@@ -18,10 +18,9 @@ export class FollowsService {
   ) {}
 
   async isFollowing(followerId: string, followingId: string): Promise<boolean> {
-    const follow = await this.followsRepository.findOne({
+    return this.followsRepository.exists({
       where: { followerId, followingId },
     });
-    return follow !== null;
   }
 
   async follow(followerId: string, followingId: string): Promise<void> {

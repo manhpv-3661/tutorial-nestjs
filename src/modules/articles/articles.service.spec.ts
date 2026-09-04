@@ -5,6 +5,7 @@ import { I18nService } from 'nestjs-i18n';
 import { QueryFailedError } from 'typeorm';
 import { FavoritesService } from '../favorites/favorites.service';
 import { FollowsService } from '../follows/follows.service';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { Article } from './entities/article.entity';
 import { ArticlesService } from './articles.service';
@@ -30,7 +31,12 @@ describe('ArticlesService', () => {
     getFavoritedArticleIds: jest.Mock;
   };
 
-  const author = { id: 'author-id', username: 'jake', bio: null, image: null };
+  const author = {
+    id: 'author-id',
+    username: 'jake',
+    bio: null,
+    image: null,
+  } as User;
 
   beforeEach(async () => {
     repository = {
@@ -70,15 +76,8 @@ describe('ArticlesService', () => {
   });
 
   describe('create', () => {
-    it('generates a slug and saves the article', async () => {
-      repository.findOne.mockResolvedValue({
-        id: 'article-id',
-        slug: 'how-to-train-your-dragon-abc123',
-        title: 'How to train your dragon',
-        author,
-      });
-
-      const article = await articlesService.create('author-id', {
+    it('generates a slug, saves the article, and attaches the given author without re-querying it', async () => {
+      const article = await articlesService.create(author, {
         title: 'How to train your dragon',
         description: 'desc',
         body: 'body',
@@ -92,6 +91,8 @@ describe('ArticlesService', () => {
       expect(savedArticle.authorId).toBe('author-id');
       expect(savedArticle.slug).toMatch(/^how-to-train-your-dragon-/);
       expect(article.title).toBe('How to train your dragon');
+      expect(article.author).toBe(author);
+      expect(repository.findOne).not.toHaveBeenCalled();
     });
 
     it('maps a slug unique-violation to a ConflictException', async () => {
@@ -101,7 +102,7 @@ describe('ArticlesService', () => {
       repository.save.mockRejectedValue(dbError);
 
       await expect(
-        articlesService.create('author-id', {
+        articlesService.create(author, {
           title: 'title',
           description: 'desc',
           body: 'body',
@@ -382,6 +383,50 @@ describe('ArticlesService', () => {
 
       expect(dto.article.favorited).toBe(true);
       expect(dto.article.author.following).toBe(true);
+    });
+
+    it('reports following=false without querying when the viewer is the article author', async () => {
+      favoritesService.countForArticle.mockResolvedValue(0);
+      const article = {
+        id: 'article-id',
+        authorId: 'author-id',
+        slug: 'a-slug',
+        title: 't',
+        description: 'd',
+        body: 'b',
+        tagList: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        author,
+      } as unknown as Article;
+
+      const dto = await articlesService.toResponseDto(article, 'author-id');
+
+      expect(dto.article.author.following).toBe(false);
+      expect(followsService.isFollowing).not.toHaveBeenCalled();
+    });
+
+    it('uses the known favorited value instead of querying when provided', async () => {
+      favoritesService.countForArticle.mockResolvedValue(5);
+      const article = {
+        id: 'article-id',
+        authorId: 'author-id',
+        slug: 'a-slug',
+        title: 't',
+        description: 'd',
+        body: 'b',
+        tagList: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        author,
+      } as unknown as Article;
+
+      const dto = await articlesService.toResponseDto(article, 'viewer-id', {
+        knownFavorited: true,
+      });
+
+      expect(dto.article.favorited).toBe(true);
+      expect(favoritesService.isFavorited).not.toHaveBeenCalled();
     });
   });
 

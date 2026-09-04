@@ -18,10 +18,9 @@ export class FavoritesService {
   ) {}
 
   async isFavorited(userId: string, articleId: string): Promise<boolean> {
-    const favorite = await this.favoritesRepository.findOne({
+    return this.favoritesRepository.exists({
       where: { userId, articleId },
     });
-    return favorite !== null;
   }
 
   async favorite(userId: string, articleId: string): Promise<void> {

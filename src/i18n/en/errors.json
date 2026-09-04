@@ -13,5 +13,7 @@
   "notArticleAuthor": "You are not the author of this article",
   "articleSlugConflict": "An article with a similar slug already exists, please try again",
   "alreadyFavorited": "You have already favorited this article",
-  "notFavorited": "You have not favorited this article"
+  "notFavorited": "You have not favorited this article",
+  "commentNotFound": "Comment not found",
+  "notCommentAuthor": "You are not the author of this comment"
 }

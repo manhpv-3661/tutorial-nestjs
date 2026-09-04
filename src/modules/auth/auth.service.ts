@@ -10,6 +10,7 @@ import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../../redis/redis.service';
 import { SALT_ROUNDS } from '../users/constants/users.constants';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -37,7 +38,7 @@ export class AuthService {
       password: hashedPassword,
     });
 
-    return UserResponseDto.fromEntity(user, this.signToken(user.id));
+    return this.usersService.toResponseDto(user, this.signToken(user.id));
   }
 
   async login(dto: LoginDto): Promise<UserResponseDto> {
@@ -46,7 +47,11 @@ export class AuthService {
       throw new UnauthorizedException(this.i18n.t('errors.invalidCredentials'));
     }
 
-    return UserResponseDto.fromEntity(user, this.signToken(user.id));
+    return this.usersService.toResponseDto(user, this.signToken(user.id));
+  }
+
+  getCurrentUser(user: User, token: string): UserResponseDto {
+    return this.usersService.toResponseDto(user, token);
   }
 
   async logout(token: string): Promise<void> {

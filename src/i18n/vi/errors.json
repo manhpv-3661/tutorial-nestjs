@@ -13,5 +13,7 @@
   "notArticleAuthor": "Bạn không phải là tác giả của bài viết này",
   "articleSlugConflict": "Đã tồn tại bài viết có slug tương tự, vui lòng thử lại",
   "alreadyFavorited": "Bạn đã yêu thích bài viết này rồi",
-  "notFavorited": "Bạn chưa yêu thích bài viết này"
+  "notFavorited": "Bạn chưa yêu thích bài viết này",
+  "commentNotFound": "Không tìm thấy bình luận",
+  "notCommentAuthor": "Bạn không phải là tác giả của bình luận này"
 }

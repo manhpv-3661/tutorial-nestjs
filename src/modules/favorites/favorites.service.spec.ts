@@ -9,7 +9,7 @@ import { FavoritesService } from './favorites.service';
 describe('FavoritesService', () => {
   let favoritesService: FavoritesService;
   let repository: {
-    findOne: jest.Mock;
+    exists: jest.Mock;
     insert: jest.Mock;
     delete: jest.Mock;
     count: jest.Mock;
@@ -19,7 +19,7 @@ describe('FavoritesService', () => {
 
   beforeEach(async () => {
     repository = {
-      findOne: jest.fn(),
+      exists: jest.fn(),
       insert: jest.fn(),
       delete: jest.fn(),
       count: jest.fn(),
@@ -43,13 +43,16 @@ describe('FavoritesService', () => {
 
   describe('isFavorited', () => {
     it('returns true when a favorite row exists', async () => {
-      repository.findOne.mockResolvedValue({ userId: 'a', articleId: 'b' });
+      repository.exists.mockResolvedValue(true);
 
       await expect(favoritesService.isFavorited('a', 'b')).resolves.toBe(true);
+      expect(repository.exists).toHaveBeenCalledWith({
+        where: { userId: 'a', articleId: 'b' },
+      });
     });
 
     it('returns false when no favorite row exists', async () => {
-      repository.findOne.mockResolvedValue(null);
+      repository.exists.mockResolvedValue(false);
 
       await expect(favoritesService.isFavorited('a', 'b')).resolves.toBe(false);
     });

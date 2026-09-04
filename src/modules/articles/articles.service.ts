@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { isUniqueViolation } from '../../common/utils/postgres-unique-violation.util';
 import { FavoritesService } from '../favorites/favorites.service';
 import { FollowsService } from '../follows/follows.service';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { generateSlug } from './utils/slug.util';
 import { Article } from './entities/article.entity';
@@ -41,13 +42,13 @@ export class ArticlesService {
     private readonly favoritesService: FavoritesService,
   ) {}
 
-  async create(authorId: string, data: CreateArticleData): Promise<Article> {
+  async create(author: User, data: CreateArticleData): Promise<Article> {
     const article = this.articlesRepository.create({
       title: data.title,
       description: data.description,
       body: data.body,
       tagList: data.tagList,
-      authorId,
+      authorId: author.id,
       slug: generateSlug(data.title),
     });
 
@@ -56,7 +57,10 @@ export class ArticlesService {
     } catch (error) {
       throw this.toConflictOrRethrow(error);
     }
-    return this.findBySlugOrThrow(article.slug);
+    // The author is already the caller's own User entity — assign it
+    // directly instead of re-querying the row we just inserted.
+    article.author = author;
+    return article;
   }
 
   async findBySlugOrThrow(slug: string): Promise<Article> {
@@ -175,15 +179,12 @@ export class ArticlesService {
   async toResponseDto(
     article: Article,
     currentUserId?: string,
+    options?: { knownFavorited?: boolean },
   ): Promise<ArticleResponseDto> {
     const [favorited, favoritesCount, authorFollowing] = await Promise.all([
-      currentUserId
-        ? this.favoritesService.isFavorited(currentUserId, article.id)
-        : Promise.resolve(false),
+      this.resolveFavorited(article.id, currentUserId, options?.knownFavorited),
       this.favoritesService.countForArticle(article.id),
-      currentUserId
-        ? this.followsService.isFollowing(currentUserId, article.authorId)
-        : Promise.resolve(false),
+      this.resolveAuthorFollowing(currentUserId, article.authorId),
     ]);
 
     const meta: ArticleResponseMeta = {
@@ -206,20 +207,12 @@ export class ArticlesService {
 
     const [favoritesCountMap, favoritedIds, followingIds] = await Promise.all([
       this.favoritesService.getFavoritesCountMap(articleIds),
-      currentUserId
-        ? this.favoritesService.getFavoritedArticleIds(
-            currentUserId,
-            articleIds,
-          )
-        : Promise.resolve(new Set<string>()),
-      // feed() already filters to articles whose author is followed, so
-      // every author on this page is followed by definition — skip the
-      // redundant lookup FollowsService just did to build the feed.
-      options?.allAuthorsFollowed
-        ? Promise.resolve(new Set(authorIds))
-        : currentUserId
-          ? this.followsService.getFollowingIds(currentUserId, authorIds)
-          : Promise.resolve(new Set<string>()),
+      this.resolveFavoritedIds(currentUserId, articleIds),
+      this.resolveFollowingIds(
+        currentUserId,
+        authorIds,
+        options?.allAuthorsFollowed,
+      ),
     ]);
 
     return ArticlesListResponseDto.fromEntities(page.articles, page.total, {
@@ -227,6 +220,62 @@ export class ArticlesService {
       favoritedIds,
       followingIds,
     });
+  }
+
+  private async resolveFavorited(
+    articleId: string,
+    currentUserId: string | undefined,
+    knownFavorited: boolean | undefined,
+  ): Promise<boolean> {
+    if (knownFavorited !== undefined) {
+      return knownFavorited;
+    }
+    if (!currentUserId) {
+      return false;
+    }
+    return this.favoritesService.isFavorited(currentUserId, articleId);
+  }
+
+  private async resolveAuthorFollowing(
+    currentUserId: string | undefined,
+    authorId: string,
+  ): Promise<boolean> {
+    // A user can never follow themselves (enforced in FollowsService.follow),
+    // so skip the query entirely when the viewer is the article's own author.
+    if (!currentUserId || currentUserId === authorId) {
+      return false;
+    }
+    return this.followsService.isFollowing(currentUserId, authorId);
+  }
+
+  private async resolveFavoritedIds(
+    currentUserId: string | undefined,
+    articleIds: string[],
+  ): Promise<Set<string>> {
+    if (!currentUserId) {
+      return new Set<string>();
+    }
+    return this.favoritesService.getFavoritedArticleIds(
+      currentUserId,
+      articleIds,
+    );
+  }
+
+  private async resolveFollowingIds(
+    currentUserId: string | undefined,
+    authorIds: string[],
+    allAuthorsFollowed: boolean | undefined,
+  ): Promise<Set<string>> {
+    // feed() already filters to articles whose author is followed, so
+    // every author on this page is followed by definition — skip the
+    // redundant lookup FollowsService just did to build the feed.
+    if (allAuthorsFollowed) {
+      return new Set(authorIds);
+    }
+    if (!currentUserId) {
+      return new Set<string>();
+    }
+    return this.followsService.getFollowingIds(currentUserId, authorIds);
   }
 
   private assertIsAuthor(article: Article, currentUserId: string): void {

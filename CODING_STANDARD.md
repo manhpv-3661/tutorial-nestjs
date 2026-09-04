@@ -17,6 +17,7 @@ Mỗi module chỉ chịu trách nhiệm cho **một domain**. Không gộp nhi�
 | `auth`        | Đăng ký, đăng nhập, JWT, blacklist token                        | Thông tin profile user                                               |
 | `articles`    | CRUD article, slug, tagList, feed, ghép author + favorite state | Quan hệ favorite thô (phải gọi qua `FavoritesService`)               |
 | `favorites`   | Quan hệ favorite/unfavorite giữa 1 user và 1 article            | Thông tin article, response DTO                                      |
+| `comments`    | CRUD comment trên 1 article, ghép author + follow state         | Truy vấn article trực tiếp (phải gọi qua `ArticlesService`)          |
 
 **Vì sao:** gộp chung khiến module phình to, khó test độc lập, và một thay đổi ở follow có thể vô tình ảnh hưởng user. Tách riêng giúp mỗi module có thể export đúng những gì module khác cần qua `exports` của `@Module`.
 
@@ -132,6 +133,10 @@ async getProfile(@Param('username') username: string, @CurrentUser() currentUser
 }
 ```
 
+**Việc dựng response DTO cũng tính là "xử lý", phải nằm trong service — kể cả khi không cần query DB thêm.** Bug thật đã có trong repo: `AuthController.getCurrentUser()` và `UsersController.updateCurrentUser()` tự gọi `UserResponseDto.fromEntity(user, token)` ngay trong controller, trong khi `AuthService.register()`/`login()` (cùng file, cùng trả `UserResponseDto`) đã làm đúng — dựng DTO trong service. Lý do sai không rõ ràng như "gọi thẳng DB": không có query nào bị lộ ra controller, chỉ là 1 lệnh gọi factory thuần — nhưng vẫn phá vỡ ranh giới trách nhiệm và không nhất quán với chính 2 hàm khác trong cùng class. Đã fix bằng cách thêm `UsersService.toResponseDto(user, token)` / `AuthService.getCurrentUser(user, token)`, controller chỉ còn gọi lại.
+
+**Áp dụng:** kể cả khi dựng response chỉ là 1 lệnh gọi static factory không cần `await`/query gì thêm, vẫn đặt trong service, không gọi `XxxResponseDto.fromEntity()` trực tiếp từ controller.
+
 ---
 
 ## 4. Type Extraction — Không dùng inline union type
@@ -203,8 +208,8 @@ export interface UpdateUserData {
 export const ALLOWED_AVATAR_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const MAX_AVATAR_SIZE = 10 * 1024 * 1024;
 
-// helpers/avatar-interceptor.helper.ts
-export function createAvatarInterceptor() {
+// interceptors/avatar-upload.interceptor.ts
+export function createAvatarUploadInterceptor() {
   return FileInterceptor('avatar', {
     limits: { fileSize: MAX_AVATAR_SIZE },
     fileFilter: (_req, file, callback) => {
@@ -218,8 +223,10 @@ export function createAvatarInterceptor() {
 }
 
 // controller
-@UseInterceptors(createAvatarInterceptor())
+@UseInterceptors(createAvatarUploadInterceptor())
 ```
+
+Ví dụ trên là code thật trong repo — `src/modules/users/interceptors/avatar-upload.interceptor.ts` — không phải minh hoạ. Chú ý tên thư mục là `interceptors/` (đúng mục 2.2, đặt cạnh vai trò NestJS thật của nó), **không phải** `helpers/`: repo này không có khái niệm "helper" chung chung nào cả, xem thêm bảng vai trò file bên dưới.
 
 ---
 
@@ -393,6 +400,7 @@ users ──depends on──▶ attachments
 follows ──depends on──▶ users (chỉ entity, qua TypeORM relation)
 articles ──depends on──▶ users, follows, favorites
 favorites ──depends on──▶ users, articles (chỉ entity, qua TypeORM relation)
+comments ──depends on──▶ articles, follows
 attachments ◀── không phụ thuộc module nghiệp vụ nào khác (module lá)
 
 redis (@Global) ──▶ không import module nghiệp vụ nào; được inject ở bất kỳ đâu, không cần import RedisModule
@@ -434,7 +442,27 @@ common/, config/ ◀── tầng thấp nhất: KHÔNG được import giá tr�
 - Bắt buộc thêm e2e cho một flow khi thoả **một trong hai** điều kiện: (1) flow đi xuyên ≥2 module (vd: register ở `auth` → dùng ở `users`/`profiles`), hoặc (2) flow phụ thuộc hành vi DB thật mà unit test mock `Repository` không kiểm chứng được (unique constraint, transaction rollback).
 - Dùng DB/Redis thật qua docker-compose (`test/utils/create-test-app.ts` boot cả `AppModule`), không mock — mục đích của e2e là xác nhận toàn bộ pipeline (guard, pipe, filter, DB constraint) hoạt động đúng với nhau, khác với unit test.
 - Dùng chung `createTestApp()` và `registerUser()` trong `test/utils/` cho mọi file e2e, không copy lại logic bootstrap/tạo user ở từng file (xem mục 5 — extract cấu hình lặp lại).
-- Hiện có: `test/auth.e2e-spec.ts` (register/login/logout/blacklist), `test/users.e2e-spec.ts` (update profile, avatar upload + mime validation), `test/follow.e2e-spec.ts` (follow/unfollow xuyên `profiles`+`follows`+`users`).
+- Hiện có: `test/auth.e2e-spec.ts` (register/login/logout/blacklist), `test/users.e2e-spec.ts` (update profile, avatar upload + mime validation), `test/follow.e2e-spec.ts` (follow/unfollow xuyên `profiles`+`follows`+`users`), `test/articles.e2e-spec.ts` (CRUD + tag/author/favorited filter + feed + favorite/unfavorite), `test/comments.e2e-spec.ts` (add/list/delete comment xuyên `comments`+`articles`+`follows`, author-only delete).
+
+**E2E dùng database riêng, tự seed/truncate mỗi test case:**
+
+- `.env.test` (khai commit trong repo, khác `.env` chỉ ở `DB_NAME=nestjs_tutorial_test`) — e2e **không bao giờ** chạy trên DB dev. Trước PR6, e2e chạy chung `.env`/DB dev nên mỗi lần chạy tích luỹ rác (697 user/102 article rác từng thấy trong DB dev khi audit lại) — tách DB riêng để triệt để.
+- `test/utils/setup-env.ts` nạp `.env.test` qua `dotenv.config()` ở `setupFiles` (chạy **trước** khi `AppModule`/`ConfigModule.forRoot()` được import) — dotenv mặc định không override biến đã có sẵn trong `process.env`, nên trên CI (đã set `DB_NAME` thật ở job `env:`) file `.env.test` bị bỏ qua tự nhiên, không cần sửa `ci.yml`.
+- `test/utils/db-reset.ts` (`truncateAllTables`) + `test/utils/seed-database.ts` (`seedDatabase`, 2 user cố định `seed_alice`/`seed_bob`) được gắn vào `beforeEach`/`afterEach` **toàn cục** qua `test/utils/reset-database.setup.ts` (khai ở `setupFilesAfterEnv`) — mọi file `*.e2e-spec.ts` tự động seed trước và truncate sau **mỗi** test case, không cần từng file tự gọi. `createTestApp()` lưu `DataSource` của app đang chạy vào biến module-scope (`getActiveDataSource()`) để hook toàn cục lấy được đúng connection.
+- **Bắt buộc `--runInBand`** (`npm run test:e2e`) vì truncate là thao tác toàn DB — nếu Jest chạy nhiều file e2e song song (nhiều worker) trên cùng 1 DB test, file này truncate sẽ xoá luôn dữ liệu file kia đang test giữa chừng, gây flaky. Chạy tuần tự loại bỏ hoàn toàn rủi ro này.
+- Migration cho DB test: `npm run migration:run:test` (dùng `data-source.test.ts`, đọc `.env.test`) — chạy 1 lần khi tạo DB test mới hoặc sau khi thêm migration mới, tương tự `migration:run` cho DB dev.
+- Dữ liệu seed (`seed_alice`/`seed_bob`) dùng username/email cố định, tách biệt hẳn với `registerUser()` (luôn sinh `user_<uuid>` ngẫu nhiên) — test hiện tại không assert danh sách toàn bộ user/article nên seed không phá assertion nào, chỉ đảm bảo DB không rỗng trước mỗi test như yêu cầu.
+
+**Coverage sâu (C2 — condition coverage) cho ít nhất 1 controller:** `comments` module (`CommentsController` + `CommentsService`) được chọn làm ví dụ — `test/comments.e2e-spec.ts` phủ cả 2 nhánh của mọi điều kiện đơn trong 2 file này (có/không token; article tồn tại/không; comment tồn tại/không; đúng/sai tác giả; viewer ẩn danh/đã đăng nhập; follow/không follow tác giả comment; body hợp lệ/rỗng).
+
+Đo bằng `npm run test:e2e:cov` (config `collectCoverageFrom` trong `test/jest-e2e.json` giới hạn vào `src/modules/comments/**/*.ts`). Kết quả đo thực tế: `comments.service.ts` và `comments.controller.ts` đều 100% statement / 100% function. Branch coverage báo 75-82% ở cả 2 file, nhưng khi soi từng nhánh cụ thể (`coverage-e2e/coverage-final.json`, field `branchMap`+`b`):
+
+- **`CommentsController`: toàn bộ nhánh "chưa phủ" nằm ở dòng `constructor(...)` và chữ ký method (`create`/`list`/`delete`)** — đây là code do TypeScript compiler tự sinh cho decorator metadata (`emitDecoratorMetadata`, cần cho Nest DI/reflection: `@Param`, `@Body`, `@CurrentUser`, `@Post`/`@Get`/`@Delete`...), không phải logic nghiệp vụ. Thân method của `CommentsController` hoàn toàn tuyến tính (gọi service → return), không có `if`/ternary nào — 0 nhánh nghiệp vụ thật để thiếu.
+- **`CommentsService`: chỉ 1 nhánh nghiệp vụ thật chưa phủ** — ternary tính `authorFollowing` trong `toResponseDto` (`currentUserId && currentUserId !== comment.authorId ? isFollowing(...) : false`). Nhánh `true` (gọi `isFollowing`) không có đường nào chạm tới qua e2e vì `toResponseDto` chỉ được gọi từ `create()`, nơi `currentUserId` luôn chính là tác giả comment vừa tạo — về cấu trúc không thể khác `comment.authorId` qua bất kỳ route hiện có nào. Đã test ở `comments.service.spec.ts` (unit, gọi thẳng `toResponseDto(comment, 'viewer-id')` với `isFollowing` mock trả `true`). Nhánh `if (!comment)` (`NotFoundException`) trong `deleteByIdForArticle` — tưởng chưa phủ ở lần đo trước — thực ra **đã** được e2e phủ (`returns 404 when deleting an unknown comment id`). Mọi ternary/`if` nghiệp vụ khác (`toListResponseDto`, nhánh `ForbiddenException` của `deleteByIdForArticle`) đều phủ cả 2 chiều qua e2e.
+
+**Áp dụng:** khi đo C2 coverage cho 1 controller/service khác, luôn soi `branchMap`/`b` trong `coverage-final.json` thay vì chỉ đọc % tổng — % branch trên file có nhiều decorator luôn bị kéo thấp giả tạo bởi code compiler sinh ra, không phản ánh đúng coverage logic thật.
+
+**i18n key parity giữa các ngôn ngữ được test tự động, không dựa vào soát tay:** `src/i18n/i18n-key-parity.spec.ts` đọc danh sách file trong `src/i18n/en/` làm chuẩn, rồi assert mọi ngôn ngữ khác (`vi/`, ...) có **đúng cùng bộ file** và mỗi file có **đúng cùng bộ key** (so path dạng `parent.child` cho JSON lồng nhau, dù hiện tại `errors.json`/`validation.json`/`common.json` đều phẳng 1 cấp). Trước đây việc này chỉ được kiểm bằng cách reviewer tự đếm key thủ công trên PR — không có gì chặn một module mới thêm key ở `en/errors.json` mà quên thêm ở `vi/errors.json`, lỗi chỉ lộ ra khi có người thật sự test bằng tiếng Việt. **Áp dụng:** khi thêm ngôn ngữ mới hoặc file i18n mới, không cần sửa gì thêm ở test này — nó tự đọc `en/` làm chuẩn và tự soát mọi ngôn ngữ còn lại.
 
 ---
 
@@ -448,6 +476,20 @@ common/, config/ ◀── tầng thấp nhất: KHÔNG được import giá tr�
 | Interface            | PascalCase                       | `AvatarFile`, `UpdateUserData`                                  |
 | Boolean method/field | bắt đầu bằng `is`/`has`/`should` | `isFollowing`, `hasAvatar`                                      |
 | File                 | kebab-case + hậu tố vai trò      | `users.controller.ts`, `follow.entity.ts`, `update-user.dto.ts` |
+
+**Vai trò các loại file phụ trợ — không phải "cứ tách ra là gọi `helper`":** câu hỏi để chọn đúng loại không phải "đặt tên gì cho hay" mà là **file đó có cần DI (inject dependency qua constructor) không**.
+
+| Loại               | Có DI? | Vai trò                                                            | Ví dụ thật trong repo                                                               |
+| ------------------ | ------ | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `*.service.ts`     | Có     | Business logic, gọi service khác, transaction                      | `ArticlesService`, `FollowsService`                                                 |
+| `*.guard.ts`       | Có     | `CanActivate` — chặn/cho qua request trước khi tới handler         | `jwt-auth.guard.ts`, `optional-jwt-auth.guard.ts`                                   |
+| `*.strategy.ts`    | Có     | Passport strategy — xác thực credential, trả `user` hoặc throw     | `jwt.strategy.ts`                                                                   |
+| `*.interceptor.ts` | Không  | Factory function trả về 1 NestJS interceptor **đã cấu hình sẵn**   | `avatar-upload.interceptor.ts` → `createAvatarUploadInterceptor()` (mục 5)          |
+| `*.util.ts`        | Không  | Hàm thuần, input→output, không side-effect, không cấu hình gì thêm | `postgres-unique-violation.util.ts`, `extract-bearer-token.util.ts`, `slug.util.ts` |
+
+Repo này **không có** file nào tên `*.helper.ts` hay thư mục `helpers/` — nếu thấy nhu cầu "tách 1 hàm cấu hình ra cho gọn" (mục 5), dùng đúng hậu tố theo **NestJS đang gọi khái niệm đó là gì** (`interceptor`, `guard`...), không tự chế thêm khái niệm "helper" chung chung. `composer` (vd `articles-response.composer.ts` reviewer từng đề xuất trên PR4) cũng không phải khái niệm riêng — nếu tách, nó vẫn là 1 `*.service.ts` có DI, chỉ là chưa được tạo ra trong repo này (xem mục 18, lý do chưa tách).
+
+Repo cũng không cần khái niệm "mapper" riêng để convert entity → DTO: logic đó nằm ngay trong static method `fromEntity()` của chính DTO class (mục 9) — `ArticleResponseFields.fromEntity()`, không phải 1 file `*.mapper.ts` tách biệt.
 
 ---
 
@@ -473,7 +515,7 @@ Sunlint là **heuristic**, một số cảnh báo không phản ánh đúng th�
 
 **Rule khi thêm ngoại lệ mới:** không tự ý bỏ qua warning — phải ghi lý do cụ thể vào bảng này khi quyết định "chấp nhận, không sửa", để review sau còn biết đây là quyết định có chủ đích chứ không phải bỏ sót.
 
-**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 19) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
+**Sunlint là gate CỤC BỘ, không phải gate CI.** `sunlint` được cài global (`@sun-asterisk/sunlint`), không có trong `devDependencies`, nên `npm ci` trên CI không có binary này — `ci.yml` **không** chạy được `lint:sunlint` và không nên thêm vào. Trách nhiệm chạy nằm ở người tạo PR (mục 22) kèm ảnh chụp kết quả. File `.sunlint-eslint.config.js` do sunlint tự sinh ra mỗi lần chạy, chứa **đường dẫn tuyệt đối theo máy** (`C:Users...`) nên đã được liệt trong `.gitignore`, `.prettierignore` và `ignores` của eslint — không commit, không format, không lint file này.
 
 ---
 
@@ -558,6 +600,16 @@ Sau khi renormalize, `git diff --exit-code` phải trả về 0 cho các file đ
 
 **Gate phải phủ CẢ REPO, không chỉ glob `src`/`test`.** Trước đây script dùng glob thủ công (`prettier --check "src/**/*.ts" "test/**/*.ts"`, `eslint "{src,apps,libs,test}/**/*.ts"`) nên **không** phủ: `data-source.ts` (file TS thật ở root, có 7 lỗi format mà CI không thấy), `eslint.config.mjs`, toàn bộ `*.json` / `*.yml` / `*.md` (kể cả `ci.yml`, `tsconfig.json`, `src/i18n/**`). Glob "an toàn" như vậy là cách âm thầm nhất để gate mất tác dụng — file không khớp glob thì không bao giờ fail.
 
+**17.6 — `npm run build` xanh và `npm run test:e2e` xanh không chứng minh app thật sự chạy được từ `dist/`.**
+
+**Bug thật, nghiêm trọng, tồn tại xuyên suốt PR1-PR6 mà không CI check nào bắt được:** `npm run start:prod` (`node dist/main`) **crash ngay khi boot** — `I18nModule` báo `ENOENT: no such file or directory, scandir 'dist/src/i18n/'`. Nguyên nhân: `tsconfig.build.json` loại trừ `data-source.ts` khỏi build nhưng **quên** loại trừ `data-source.test.ts` (file thêm sau ở PR6, nằm ở root repo, cạnh `src/`). Vì `data-source.test.ts` vẫn nằm trong tập file compile, TypeScript suy ra `rootDir` chung là **root repo** (không phải `src/`) — toàn bộ `src/**` bị nén thêm 1 cấp thành `dist/src/**`, trong khi `nest-cli.json` copy asset `i18n/**/*` (glob tính từ `sourceRoot: "src"`) lại ra `dist/i18n/` (không có tiền tố `src/`). Hai đường dẫn lệch nhau đúng 1 cấp — `app.module.ts` tìm i18n ở `dist/src/i18n/` (theo `__dirname` lúc runtime của bản build lệch), asset lại nằm ở `dist/i18n/`.
+
+**Vì sao không CI job nào bắt được suốt 6 pull:** `npm run build` chỉ chạy `tsc` — chứng minh code hợp lệ về **type**, không hề thử **chạy** artifact vừa build ra. `npm run test:e2e` import thẳng `AppModule` từ **source TypeScript** qua `ts-jest` (`test/utils/create-test-app.ts`), không đụng tới `dist/` — nên `__dirname` lúc test luôn trỏ đúng `src/`, không bao giờ tái hiện được lỗi lệch đường dẫn này. Nghĩa là 2 gate tưởng như đã phủ đủ ("build sạch" + "e2e xanh") **cùng nhau vẫn để lọt 1 lỗi khiến app thật sự không khởi động được**.
+
+**Đã fix:** thêm `data-source.test.ts` vào `exclude` của `tsconfig.build.json` (khôi phục `rootDir` suy ra đúng về `src/`, output về lại `dist/**` không tiền tố), đồng thời thu hẹp `nest-cli.json`'s `assets` từ `"i18n/**/*"` thành `"i18n/**/*.json"` (glob cũ vô tình copy nhầm cả `i18n-key-parity.spec.ts` vào artifact production). Verify bằng cách thật sự chạy `npm run start:prod`, curl `/api-docs` (200) và 1 request thật gây lỗi validate (message trả về đúng tiếng Anh) — không chỉ tin vào exit code của `build`.
+
+**Áp dụng:** khi thêm file `.ts` mới ở **repo root** (ngang hàng `data-source.ts`, không nằm trong `src/`), luôn kiểm tra `tsconfig.build.json`'s `exclude` đã liệt kê file đó chưa nếu nó không cần có trong production build. Định kỳ (hoặc sau khi đổi `tsconfig.build.json`/`nest-cli.json`), chạy thật `npm run build && npm run start:prod` rồi curl thử 1 endpoint — đừng chỉ tin `tsc`/`test:e2e` xanh là app chạy được, vì cả 2 đều không đi qua `dist/` theo đúng cách production thật sự chạy.
+
 **Rule:** dùng `prettier --check .` / `prettier --write .` và `eslint .` (flat config tự quyết định file nào được lint), rồi khai loại trừ **một nơi duy nhất**: `.prettierignore` cho prettier, `ignores: [...]` trong `eslint.config.mjs` cho eslint (`dist`, `coverage`, `storage`, `package-lock.json`, `.sunlint-eslint.config.js`). Thêm file/loại file mới vào repo là tự động được gate, không phải nhớ sửa glob.
 
 **17.3 — Đọc env var: `ConfigService.getOrThrow()`, trừ `registerAs()` factory.**
@@ -638,11 +690,194 @@ query.andWhere(
 
 **Áp dụng:** trước khi thêm 1 query batch (`getXxxIds`) vào bước compose response, tự hỏi: điều kiện `WHERE`/filter của query chính có đang đảm bảo sẵn kết quả này cho **mọi** dòng trả về không? Nếu có, truyền thẳng giá trị đó xuống thay vì hỏi lại (xem `toListResponseDto(..., { allAuthorsFollowed: true })` trong `articles.service.ts`).
 
+**18.4 — List endpoint trên bảng có thể tăng không giới hạn phải có pagination, hoặc ghi rõ lý do vì sao cố tình không có.**
+
+**Rule:** trước khi thêm 1 list endpoint mới (hoặc method service trả về mảng không giới hạn), tự hỏi bảng nguồn có thể tăng không giới hạn theo thời gian/theo hành vi user không (khác với quan hệ 1-owner-vài-bản-ghi như attachment/avatar). Nếu có, endpoint phải nhận `limit`/`offset` — tái sử dụng `PaginationQueryDto` đã có ở `articles`, không tự chế lại. Nếu cố tình bỏ pagination vì lý do spec/UX, phải ghi rõ lý do bằng comment WHY ngay tại chỗ khai method (mục 13), không im lặng bỏ qua.
+
+**Ví dụ đã sửa — `CommentsService.listByArticle()`:** ban đầu fetch **toàn bộ** comment của 1 article, không giới hạn, với lý do "khớp RealWorld spec gốc (comment không phân trang)" ghi lại bằng comment WHY tại chỗ. Mentor review PR5 (binhpt-3177) không chấp nhận lý do này — spec không phân trang không có nghĩa là bảng nguồn không thể tăng không giới hạn, và hình dạng lỗi giống hệt mục 18.2: một bài viral hàng chục nghìn comment vẫn kéo hết về 1 query. Đã sửa: nhận `PaginationQueryDto` (tái sử dụng từ `articles`, đúng theo rule dưới đây) và `skip`/`take` trong query, xoá comment WHY vì lý do đó không còn đúng nữa. Bài học: một quyết định "cố ý, có ghi lý do" trong code vẫn phải nhường khi review thật (không phải chỉ tự-review) chỉ ra lý do đó không đứng vững.
+
+**Áp dụng:** khi thêm list endpoint mới, mặc định thêm `PaginationQueryDto`. Nếu quyết định không phân trang, dòng comment WHY tại chỗ khai method là bắt buộc, không phải tuỳ chọn.
+
+**18.5 — Check tồn tại (exists) dùng `Repository.exists()`, không `findOne()` rồi so `!== null`.**
+
+**Sai:**
+
+```typescript
+async isFavorited(userId: string, articleId: string): Promise<boolean> {
+  const favorite = await this.favoritesRepository.findOne({ where: { userId, articleId } });
+  return favorite !== null; // fetch nguyên row rồi vứt đi, chỉ cần biết có/không
+}
+```
+
+**Đúng:**
+
+```typescript
+async isFavorited(userId: string, articleId: string): Promise<boolean> {
+  return this.favoritesRepository.exists({ where: { userId, articleId } });
+}
+```
+
+**Vì sao:** `findOne()` bắt TypeORM build lại toàn bộ entity từ row (mọi cột) chỉ để kiểm tra khác `null`. `exists()` (có sẵn từ TypeORM 0.3.x, repo đang dùng `^0.3.31`) sinh câu SQL gọn hơn, không cần hydrate entity — đúng việc cần làm là "có hàng nào khớp điều kiện không", không phải "lấy hàng đó về". Bug thật (không phải giả định): `FollowsService.isFollowing()` và `FavoritesService.isFavorited()` đều dùng `findOne()` kiểu này, trong khi `FavoritesService.countForArticle()` ngay cạnh đó lại đã dùng đúng pattern tương đương (`repository.count(...)`) — tức là một phần code trong cùng file đã biết cách làm đúng, phần còn lại thì chưa. 2 method này bị gọi rất thường xuyên: mỗi lần xem 1 article, mỗi lần follow/favorite đều gọi trước khi ghi.
+
+**Áp dụng:** khi viết method chỉ trả `boolean` cho câu hỏi "bản ghi X có tồn tại không", dùng `repository.exists({ where })`, không `findOne()` + so `null`. `findOne()` chỉ dùng khi thực sự cần dữ liệu của row đó.
+
+**18.6 — Tránh N+1: gom id của cả trang rồi hỏi DB một lần, không lặp qua từng item rồi query riêng.**
+
+**Sai (N+1 — 20 article thành 21 query):**
+
+```typescript
+async toListResponseDto(articles: Article[]): Promise<ArticleResponseFields[]> {
+  return Promise.all(
+    articles.map(async (article) => {
+      const favorited = await this.favoritesService.isFavorited(userId, article.id); // 1 query/article
+      return ArticleResponseFields.fromEntity(article, { favorited /* ... */ });
+    }),
+  );
+}
+```
+
+**Đúng (batch — hằng số query bất kể trang có bao nhiêu article):**
+
+```typescript
+const favoritedIds = await this.favoritesService.getFavoritedArticleIds(
+  userId,
+  articleIds,
+); // 1 query cho cả trang
+return articles.map((article) =>
+  ArticleResponseFields.fromEntity(article, {
+    favorited: favoritedIds.has(article.id) /* ... */,
+  }),
+);
+```
+
+**Vì sao:** đây là điểm reviewer đánh giá cao nhất trên PR4 ("Không có N+1 — đây là điểm đáng giá nhất của PR") — nhưng trước khi thêm mục này, cả `CODING_STANDARD.md` **không có chỗ nào ghi chữ "N+1"**, kỹ thuật làm đúng chỉ được nhắc thoáng qua trong ví dụ ở mục 18.3. Đo thật trên repo (20 article, 20 tác giả khác nhau, TypeORM query log): `GET /articles` ẩn danh 4 query, đã đăng nhập 7 query, `/feed` 8 query, `/:slug` 6 query — **hằng số**, không tăng theo số bài, nhờ `getFavoritesCountMap`/`getFavoritedArticleIds`/`getFollowingIds` gom id cả trang rồi hỏi một lần, trả `Map`/`Set` để tra O(1). Lặp qua từng item gọi `isFavorited()` riêng lẻ sẽ biến 20 bài thành 60+ query.
+
+**Áp dụng:** bất kỳ chỗ nào ghép dữ liệu quan hệ (favorite/follow/comment-count...) cho **một danh sách** bản ghi, viết method dạng `getXxxIds(ownerIds, targetIds?)`/`getXxxCountMap(targetIds)` trả `Set`/`Map`, gọi đúng 1 lần cho cả trang trước khi map qua từng item — không gọi lại 1 method dành cho single-item (`isFollowing`, `isFavorited`...) bên trong `.map()`/vòng lặp.
+
+**18.7 — Connection pool và statement timeout phải được khai tường minh, không im lặng dựa vào default của driver.**
+
+**Rule:** `DataSourceOptions.extra` phải khai rõ `max` (pool size) và `statement_timeout` (ms), thay vì để trống và dựa vào default của `pg.Pool`.
+
+**Vì sao:** trước khi thêm rule này, `src/config/typeorm.config.ts` hoàn toàn không có `extra` — nghĩa là chạy 100% theo default ngầm của driver `pg`: pool tối đa 10 connection, và **không có statement timeout nào cả**. Không có statement timeout là rủi ro thật: 1 câu query treo/chạy runaway (bug logic, hoặc query bị khoá do lock chờ) sẽ giữ nguyên 1 connection trong pool vô thời hạn, dần dần rút cạn pool cho tới khi request khác không lấy được connection nữa — mà không có gì báo lỗi rõ ràng tại thời điểm đó.
+
+**Áp dụng:** `extra: { max: 10, statement_timeout: 10_000 }` trong `buildDataSourceOptions()` cho **app runtime** — `max` giữ nguyên giá trị default (không đổi hành vi, chỉ khai tường minh để đây là quyết định có chủ đích), `statement_timeout` 10s đủ dư cho mọi query hiện tại của app (lookup đơn/list phân trang) nhưng chặn được query treo vô hạn.
+
+**Không áp timeout này cho migration runner.** `buildDataSourceOptions()` nhận tham số thứ 2 `{ forMigrations?: boolean }` — `data-source.ts`/`data-source.test.ts` (dùng cho `migration:run`/`migration:run:test`, chạy 1 lần qua CLI, không phải pool phục vụ request liên tục) truyền `{ forMigrations: true }` để bỏ hẳn `extra`, không kế thừa `statement_timeout: 10_000` của app runtime. Lý do: rule này ban đầu dùng chung 1 `extra` cho cả 2 loại DataSource — nếu sau này có 1 migration hợp lệ chạy lâu hơn 10s (vd backfill 1 cột NOT NULL trên bảng đã có nhiều dữ liệu, tạo index không dùng `CONCURRENTLY`), Postgres sẽ tự huỷ giữa chừng với lỗi `canceling statement due to statement timeout`, làm hỏng `migration:run` mà không liên quan gì tới rule này đang bảo vệ app khỏi query treo. Nếu 1 migration thật sự cần chạy lâu, thêm `statement_timeout` riêng ngay trong file migration đó (`SET statement_timeout = 0` hoặc giá trị cụ thể) thay vì nới rule chung.
+
+**18.8 — Sau khi `save()`/`insert()`, không query lại dữ liệu đã có sẵn trong tay chỉ để dựng response.**
+
+**Sai:** `CommentsService.create()` insert xong rồi gọi lại `findByIdOrThrow(comment.id)` — thêm 2 query (`SELECT DISTINCT` + `SELECT ... JOIN author`) chỉ để nạp lại quan hệ `author`, trong khi `author` chính là `User` đang gọi request (đã có sẵn từ `@CurrentUser()`/guard, không cần hỏi lại DB).
+
+**Đúng:**
+
+```typescript
+async create(articleId: string, author: User, data: CreateCommentData): Promise<Comment> {
+  const comment = this.commentsRepository.create({ body: data.body, articleId, authorId: author.id });
+  await this.commentsRepository.save(comment);
+  comment.author = author; // đã có sẵn, không re-fetch
+  return comment;
+}
+```
+
+**Vì sao:** Mentor review PR5 (binhpt-3177) đo bằng query log: `POST /comments` tốn 9 query, trong đó riêng cặp re-fetch này chiếm 2 query oan — không phải do TypeORM bắt buộc, mà do code tự đi hỏi lại một sự thật đã biết.
+
+**18.9 — Không tự query lại một quan hệ mà điều kiện đã biết trước kết quả (self-relationship).**
+
+**Sai:** `CommentsService.toResponseDto()` gọi `followsService.isFollowing(currentUserId, comment.authorId)` vô điều kiện mỗi khi có `currentUserId` — kể cả khi `currentUserId === comment.authorId` (tác giả tự xem comment của chính mình). Một user không bao giờ follow được chính mình (`FollowsService.follow()` chặn bằng `ConflictException`), nên kết quả **luôn** là `false`, tốn 1 query để hỏi một câu đã biết sẵn câu trả lời.
+
+**Đúng:**
+
+```typescript
+const authorFollowing =
+  currentUserId && currentUserId !== comment.authorId
+    ? await this.followsService.isFollowing(currentUserId, comment.authorId)
+    : false;
+```
+
+**Vì sao:** cùng một mentor review, cùng phép đo — đây là query thứ 9/9 trong log ban đầu (`SELECT follows ← isFollowing(me, me)`). Sau 2 fix ở mục 18.8 và mục này, `POST /comments` còn đúng 6 query (đo lại bằng cách gắn `DataSource.logger` tuỳ chỉnh trong e2e test, xem cách đo ở PR review reply).
+
+**Áp dụng chung cho 18.8/18.9:** trước khi thêm 1 query (re-fetch hoặc gọi service khác) ngay sau một thao tác ghi hoặc trong bước dựng response, tự hỏi: dữ liệu này có **chắc chắn** đã nằm trong tay (tham số đầu vào, kết quả của bước trước) hoặc **suy ra được** từ một bất biến đã biết (không thể tự follow chính mình) không? Nếu có, dùng thẳng, không hỏi lại DB.
+
+**Cùng pattern áp dụng luôn cho `ArticlesService` (không đợi review riêng mới sửa):** rà lại thấy `articles` có đúng 2 chỗ hình dạng giống hệt — `create()` cũng `save()` xong `findBySlugOrThrow()` lại chỉ để nạp `author` (đã có sẵn từ `@CurrentUser()`, sửa giống mục 18.8), và `toResponseDto()` cũng gọi `isFollowing(currentUserId, article.authorId)` vô điều kiện, tự hỏi self-follow khi tác giả xem/sửa bài viết của chính mình (sửa giống mục 18.9). Thêm 1 trường hợp mới không có ở comments: `favorite()`/`unfavorite()` gọi `toResponseDto()` ngay sau khi favorite/unfavorite thành công, nhưng `toResponseDto()` lại tự hỏi lại `isFavorited()` — trong khi kết quả **chắc chắn** đã biết (favorite thành công → `favorited: true`, unfavorite thành công → `favorited: false`). Vì `toResponseDto()` dùng chung cho nhiều endpoint (create/get/update/favorite/unfavorite) nên không thể đổi mặc định — thêm tham số `options?: { knownFavorited?: boolean }` (cùng khuôn với `toListResponseDto`'s `allAuthorsFollowed` ở mục 18.3), chỉ 2 call site `favorite`/`unfavorite` truyền vào, các call site còn lại vẫn query như cũ.
+
+**Áp dụng mở rộng:** khi 1 method dựng response được gọi ngay sau 1 thao tác ghi mà chính thao tác đó đã xác định chắc chắn 1 trong các field của response (favorited sau favorite/unfavorite, following sau follow/unfollow...), truyền field đó xuống qua tham số `options` thay vì để method dựng response tự hỏi lại — đừng chỉ sửa đúng chỗ reviewer chỉ ra, tìm luôn những chỗ cùng hình dạng trong các module khác.
+
 ---
 
-## 19. Checklist trước khi tạo PR
+## 19. Swagger — Endpoint mới phải khai `@ApiOperation` + `@ApiResponse` cho lỗi
 
-- [ ] Controller không chứa business logic — chỉ gọi service.
+**Rule:** Mọi route handler mới (hoặc route đổi hành vi lỗi) phải có `@ApiOperation({ summary: ... })` mô tả ngắn gọn hành động, và `@ApiResponse` cho **từng** status code lỗi mà route thực sự có thể trả (401/403/404/409...), không chỉ dựa vào `@ApiProperty` trên DTO thành công.
+
+**Vì sao:** hiện tại (soát tới hết PR6) **không có route nào** trong `src/modules/**` khai `@ApiOperation`/`@ApiResponse` — Swagger UI chỉ tự suy ra được response 200 từ DTO trả về (`@ApiProperty`) và path/param, còn toàn bộ case lỗi (vd `409 ConflictException` khi slug trùng, `403 ForbiddenException` khi không phải author, `404` khi không tìm thấy resource) hoàn toàn không xuất hiện trong docs — người đọc Swagger không biết endpoint có thể fail thế nào mà không phải đọc thẳng source code.
+
+**Sai (không có gì ngoài path/param):**
+
+```typescript
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Post(':slug/favorite')
+async favorite(
+  @Param('slug') slug: string,
+  @CurrentUser() currentUser: User,
+): Promise<ArticleResponseDto> {
+  return this.articlesService.toResponseDto(
+    await this.articlesService.favorite(slug, currentUser.id),
+    currentUser.id,
+  );
+}
+```
+
+**Đúng:**
+
+```typescript
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@ApiOperation({ summary: 'Favorite an article' })
+@ApiResponse({ status: 401, description: 'Missing or invalid token' })
+@ApiResponse({ status: 404, description: 'Article not found' })
+@Post(':slug/favorite')
+async favorite(
+  @Param('slug') slug: string,
+  @CurrentUser() currentUser: User,
+): Promise<ArticleResponseDto> {
+  return this.articlesService.toResponseDto(
+    await this.articlesService.favorite(slug, currentUser.id),
+    currentUser.id,
+  );
+}
+```
+
+**Áp dụng:** khi thêm route mới, liệt kê trước các exception mà service phía dưới thực sự throw (đọc thẳng service, không đoán), rồi khai đúng từng `@ApiResponse`. Route hiện có trong repo (từ PR1-PR6) phần lớn **chưa** được retrofit theo rule này — áp dụng dần khi route đó được sửa/chạm tới, không cần làm 1 lượt riêng. `CommentsController` (`create`/`list`/`delete`) là ví dụ retrofit đầu tiên, làm ngay khi `list()` bị sửa (thêm pagination) trong PR6 — đúng tinh thần "sửa tới đâu, khai tới đó" của rule này.
+
+---
+
+## 20. Test Coverage Threshold
+
+**Rule:** `package.json`'s `jest.coverageThreshold.global` đặt sàn tối thiểu cho `npm run test:cov` (statements 70 / branches 65 / functions 60 / lines 70). `ci.yml` chạy `npm run test:cov` (không phải `npm test` trơn) nên ngưỡng này **thật sự chặn CI**, không chỉ là con số tham khảo.
+
+**Vì sao:** con số này lấy từ coverage đo thật của repo tại thời điểm thêm rule (statements 74.1% / branches 71.04% / functions 66.24% / lines 74.88%), hạ xuống một khoảng an toàn để làm **sàn chống tụt**, không phải mục tiêu để cố đạt. Coverage tổng thấp hơn 100% là **có chủ đích** theo mục 11 ("không viết test cho code chỉ gọi lại thư viện") — file `*.module.ts` (chỉ khai DI wiring), entity (chỉ field + decorator, không logic), `redis.service.ts` (wrapper mỏng qua `ioredis`) đều gần như không có gì để test nên kéo % tổng xuống một cách hợp lý. Threshold ở đây tồn tại để bắt **tụt coverage bất ngờ** (thêm logic mới có nhánh lỗi mà quên viết test), không phải để ép coverage cao giả tạo bằng cách test lại thư viện.
+
+**Áp dụng:** nếu thêm code có nhiều logic mới (branch/condition thật) mà không kèm test, `npm run test:cov` sẽ fail cục bộ trước khi push. Không hạ threshold để né lỗi này — thêm test cho nhánh còn thiếu. Chỉ hạ threshold khi có lý do kiến trúc thật (vd thêm hẳn 1 module chỉ toàn DI wiring không có logic) và phải ghi lại lý do ngay tại chỗ sửa, tương tự mục 14.
+
+---
+
+## 21. Field free-text phải có `@MaxLength`
+
+**Rule:** Mọi field kiểu `string` nhận nội dung tự do từ client (title, description, body, comment...) phải có `@MaxLength` bên cạnh `@MinLength`/`@IsString`, giá trị lấy từ constant trong `constants/` của module — không hardcode số trong decorator.
+
+**Vì sao:** trước khi thêm rule này, `title`/`description`/`body` của article và `body` của comment chỉ có `@MinLength(1)`, không có cận trên nào — validation layer chấp nhận request tuỳ ý dài. Không có gì "vỡ ngay" như mục 18 (Express body-parser mặc định đã chặn ở ~100kb/request), nhưng đây là dạng "chưa ai quyết định tường minh" giống hệt mục 18.7 trước khi fix: không ai chọn 1 giới hạn cụ thể, index/storage cứ lớn dần theo dữ liệu người dùng tự nhập mà không kiểm soát được.
+
+**Áp dụng:** `MAX_TITLE_LENGTH`/`MAX_DESCRIPTION_LENGTH`/`MAX_BODY_LENGTH` (`articles.constants.ts`), `MAX_BODY_LENGTH` (`comments.constants.ts`) — mỗi module tự định nghĩa hằng số riêng theo đúng mục 12 (constant thuộc domain nào nằm trong `constants/` của module đó), không dùng chung 1 hằng số toàn cục cho mọi loại field.
+
+**`@MinLength(1)` không chặn được chuỗi toàn khoảng trắng.** Mentor review PR5 (binhpt-3177) chỉ ra: `"   "` (toàn dấu cách) có `length` là 3, vượt qua `@MinLength(1)` dù về nội dung thực chất là rỗng. Đã sửa `CreateCommentDto.body` bằng `@Matches(/\S/, {...})` thay cho `@MinLength(1)` — `\S` đòi hỏi ít nhất 1 ký tự không-phải-khoảng-trắng ở bất kỳ đâu trong chuỗi, chặn được cả `""` lẫn chuỗi toàn dấu cách/tab/xuống dòng mà không cần 2 decorator chồng nhau (lưu ý: không chặn được ký tự Unicode không-in-được nhưng cũng không khớp `\S`, vd zero-width space `U+200B` — lỗ hổng này đã tồn tại từ trước với `@MinLength(1)`, không phải regression mới). Rà lại thấy `CreateArticleDto`/`UpdateArticleDto` (`title`/`description`/`body`) có cùng lỗ hổng — đã sửa đồng loạt sang `@Matches(/\S/, {...})`, không đợi review riêng.
+
+**Áp dụng:** field free-text nào chỉ có `@MinLength(1)` để chặn "không được rỗng" (title/description/body/comment...) phải dùng `@Matches(/\S/, {...})` thay vì `@MinLength(1)` để chặn luôn trường hợp toàn khoảng trắng — áp dụng cho **mọi** field free-text trong repo, không chỉ chỗ reviewer vừa chỉ ra. Bộ ba `@IsString`/`@Matches(/\S/, ...)`/`@MaxLength` được gom vào 1 decorator dùng chung `IsNonBlankString(maxLength, messageKeys)` (`src/common/decorators/is-non-blank-string.decorator.ts`) thay vì lặp lại ở từng field — field mới chỉ cần `@IsNonBlankString(MAX_X_LENGTH, { minLength: '...', maxLength: '...' })`.
+
+---
+
+## 22. Checklist trước khi tạo PR
+
+- [ ] Controller không chứa business logic — chỉ gọi service. Kể cả dựng response DTO (`XxxResponseDto.fromEntity()`) cũng phải nằm trong service, không gọi thẳng từ controller (mục 3).
 - [ ] Mỗi module đúng 1 domain, không lẫn nghiệp vụ khác; không có import vòng giữa module (mục 10).
 - [ ] `{feature}.controller.ts`/`.service.ts`/`.module.ts` phẳng ở root module; `dto/`, `entities/`, `guards/`, `constants/`, `interfaces/`... đúng subfolder theo vai trò (mục 2.2).
 - [ ] File mới đặt đúng tầng: dùng chung → `common/` (helper hậu tố `.util.ts`), infra → `src/{infra}/`, nghiệp vụ → `src/modules/{feature}/` (mục 2.1). `common/` không import giá trị từ `modules/` — nếu cần shape thì `import type` (mục 10).
@@ -660,9 +895,18 @@ query.andWhere(
 - [ ] Env var đọc qua `ConfigService.getOrThrow()`, trừ `registerAs()` factory và `data-source.ts` (mục 17.3); không dùng `get()` + `!`.
 - [ ] `git ls-files --eol | grep w/crlf` rỗng — working tree sạch LF (mục 17.1).
 - [ ] `tsconfig.json` vẫn `strict: true`; không nới flag để code mới compile (mục 17.4).
-- [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14. Đây là gate cục bộ, CI không chạy được (mục 14).
+- [ ] Nếu vừa thêm file `.ts` mới ở repo root hoặc sửa `tsconfig.build.json`/`nest-cli.json`: chạy thật `npm run build && npm run start:prod` rồi curl thử 1 endpoint — `build` xanh và `test:e2e` xanh không chứng minh app boot được từ `dist/` (mục 17.6).
+- [ ] Chạy `npm run lint:sunlint` — 0 errors; warning mới phát sinh phải được review, warning đã biết xem mục 14. Đây là gate cục bộ, CI không chạy được (mục 14). **Đính kèm ảnh chụp kết quả sạch (0 errors) vào PR** trước khi gửi review — bắt buộc theo yêu cầu của mentor, không chỉ chạy xong là đủ.
 - [ ] Chạy `npm run lint:check` và `npm run format:check` (bản không `--fix`/`--write`, phủ **cả repo** chứ không chỉ `src`/`test`) — đây là bản CI thật sự chạy, không phải `lint`/`format` (mục 17.2).
-- [ ] Chạy `npm run build`, `npm test`, và `npm run test:e2e` — cả 3 đều pass.
+- [ ] Chạy `npm run build`, `npm run test:cov`, và `npm run test:e2e` — cả 3 đều pass; `test:cov` không được thấp hơn `coverageThreshold` (mục 20).
 - [ ] Query list/feed chạy trên mọi request có index cho cột `ORDER BY` (mục 18.1).
 - [ ] Filter/feed theo quan hệ user↔bản ghi (favorite, follow...) dùng `EXISTS` trong SQL, không kéo id list vào app rồi `IN (...)` khi tập đó không có cận trên cố định (mục 18.2).
 - [ ] Không có query nào hỏi lại một sự thật mà điều kiện filter/where của bước trước đã đảm bảo sẵn (mục 18.3).
+- [ ] List endpoint mới trên bảng có thể tăng không giới hạn có `limit`/`offset` (`PaginationQueryDto`), hoặc có comment WHY giải thích rõ vì sao cố tình không phân trang (mục 18.4).
+- [ ] Method chỉ trả `boolean` cho câu hỏi tồn tại dùng `repository.exists()`, không `findOne()` + so `null` (mục 18.5).
+- [ ] Ghép dữ liệu quan hệ cho 1 danh sách bản ghi dùng batch `getXxxIds`/`getXxxCountMap` gọi 1 lần, không lặp gọi method single-item bên trong vòng lặp/`.map()` (mục 18.6).
+- [ ] `DataSourceOptions.extra` có khai `max`/`statement_timeout` tường minh, không để trống dựa vào default driver (mục 18.7).
+- [ ] Field free-text (title/description/body/comment...) có `@MaxLength` lấy từ constant của module; dùng `@Matches(/\S/, ...)` thay vì `@MinLength(1)` để chặn cả chuỗi toàn khoảng trắng (mục 21).
+- [ ] Sau `save()`/`insert()`, không re-fetch dữ liệu đã có sẵn trong tay chỉ để dựng response; không tự query lại một quan hệ mà điều kiện đã biết trước kết quả (vd self-follow) (mục 18.8, 18.9).
+- [ ] Thêm/sửa key i18n thì sửa **cả** `en/` và `vi/` — chạy `npm test` (bao gồm `i18n-key-parity.spec.ts`) để tự xác nhận không lệch key (mục 11).
+- [ ] Route mới hoặc route đổi hành vi lỗi có `@ApiOperation` + `@ApiResponse` cho từng status lỗi thực sự có thể trả (mục 19).

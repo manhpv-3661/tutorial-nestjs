@@ -253,4 +253,26 @@ describe('UsersService', () => {
       expect(updatePayload.password).not.toBe('newpass1');
     });
   });
+
+  describe('toResponseDto', () => {
+    it('wraps the user and token into a UserResponseDto', () => {
+      const user = {
+        id: 'user-id',
+        username: 'jake',
+        email: 'jake@jake.jake',
+        bio: 'bio',
+        image: null,
+      } as User;
+
+      const dto = usersService.toResponseDto(user, 'jwt-token');
+
+      expect(dto.user).toEqual({
+        username: 'jake',
+        email: 'jake@jake.jake',
+        bio: 'bio',
+        image: null,
+        token: 'jwt-token',
+      });
+    });
+  });
 });
