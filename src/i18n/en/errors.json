@@ -1,0 +1,19 @@
+{
+  "emailAlreadyRegistered": "Email already registered",
+  "invalidCredentials": "Invalid credentials",
+  "tokenRevoked": "Token has been revoked",
+  "userNotFound": "User not found",
+  "usernameOrEmailAlreadyRegistered": "Username or email already registered",
+  "attachmentNotFound": "Attachment not found",
+  "usernameAlreadyTaken": "Username already taken",
+  "alreadyFollowing": "You are already following this user",
+  "notFollowing": "You are not following this user",
+  "cannotFollowSelf": "You cannot follow yourself",
+  "articleNotFound": "Article not found",
+  "notArticleAuthor": "You are not the author of this article",
+  "articleSlugConflict": "An article with a similar slug already exists, please try again",
+  "alreadyFavorited": "You have already favorited this article",
+  "notFavorited": "You have not favorited this article",
+  "commentNotFound": "Comment not found",
+  "notCommentAuthor": "You are not the author of this comment"
+}

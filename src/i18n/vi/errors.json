@@ -1,0 +1,19 @@
+{
+  "emailAlreadyRegistered": "Email đã được đăng ký",
+  "invalidCredentials": "Sai email hoặc mật khẩu",
+  "tokenRevoked": "Token đã bị vô hiệu hoá",
+  "userNotFound": "Không tìm thấy người dùng",
+  "usernameOrEmailAlreadyRegistered": "Username hoặc email đã được đăng ký",
+  "attachmentNotFound": "Không tìm thấy tệp",
+  "usernameAlreadyTaken": "Username đã được sử dụng",
+  "alreadyFollowing": "Bạn đã theo dõi người này rồi",
+  "notFollowing": "Bạn chưa theo dõi người này",
+  "cannotFollowSelf": "Bạn không thể tự theo dõi mình",
+  "articleNotFound": "Không tìm thấy bài viết",
+  "notArticleAuthor": "Bạn không phải là tác giả của bài viết này",
+  "articleSlugConflict": "Đã tồn tại bài viết có slug tương tự, vui lòng thử lại",
+  "alreadyFavorited": "Bạn đã yêu thích bài viết này rồi",
+  "notFavorited": "Bạn chưa yêu thích bài viết này",
+  "commentNotFound": "Không tìm thấy bình luận",
+  "notCommentAuthor": "Bạn không phải là tác giả của bình luận này"
+}

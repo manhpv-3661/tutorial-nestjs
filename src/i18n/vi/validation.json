@@ -1,0 +1,18 @@
+{
+  "IS_EMAIL": "Email không hợp lệ",
+  "IS_STRING": "Giá trị phải là chuỗi ký tự",
+  "IS_ARRAY": "Giá trị phải là một mảng",
+  "IS_INT": "Giá trị phải là số nguyên",
+  "MIN_LENGTH_USERNAME": "Username phải có ít nhất 3 ký tự",
+  "MIN_LENGTH_PASSWORD": "Password phải có ít nhất 8 ký tự",
+  "MIN_LENGTH_TITLE": "Tiêu đề không được để trống",
+  "MIN_LENGTH_DESCRIPTION": "Mô tả không được để trống",
+  "MIN_LENGTH_BODY": "Nội dung không được để trống",
+  "MAX_LENGTH_TITLE": "Tiêu đề không được vượt quá 200 ký tự",
+  "MAX_LENGTH_DESCRIPTION": "Mô tả không được vượt quá 500 ký tự",
+  "MAX_LENGTH_BODY": "Nội dung không được vượt quá 50000 ký tự",
+  "MAX_LENGTH_COMMENT_BODY": "Bình luận không được vượt quá 5000 ký tự",
+  "MIN_LIMIT": "Limit phải lớn hơn hoặc bằng 1",
+  "MAX_LIMIT": "Limit không được vượt quá 100",
+  "MIN_OFFSET": "Offset không được âm"
+}
