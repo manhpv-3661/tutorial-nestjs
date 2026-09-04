@@ -42,8 +42,21 @@ Responses support `en` (default) and `vi`, resolved from (in order of priority):
 ```bash
 npm run test       # unit tests
 npm run test:e2e   # e2e tests
-npm run test:cov   # coverage
+npm run test:cov   # unit test coverage
+npm run test:e2e:cov  # e2e test coverage
 ```
+
+`test:e2e` runs against a **separate database** (`.env.test`, `DB_NAME=nestjs_tutorial_test`
+by default), never the dev DB from `.env` — first-time setup needs the test DB's schema
+created once:
+
+```bash
+npm run migration:run:test
+```
+
+Every e2e test case runs against a freshly seeded + truncated database (see
+`test/utils/reset-database.setup.ts`), and the suite always runs with `--runInBand`
+(serial, not parallel) since truncation is a whole-database operation.
 
 ## Linting & code standards
 
@@ -81,6 +94,9 @@ src/
     follows/           # follow/unfollow relation
     profiles/          # public profile (user + following status)
     attachments/       # uploaded file storage & serving
+    articles/          # article CRUD, slug, tags, list/feed filters
+    favorites/         # article favorite/unfavorite relation
+    comments/          # add/list/delete comments on an article
 test/                  # e2e tests + shared test utils
 ```
 

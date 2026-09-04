@@ -53,7 +53,7 @@ describe('ArticlesController', () => {
       body: 'body',
     });
 
-    expect(articlesService.create).toHaveBeenCalledWith('current-id', {
+    expect(articlesService.create).toHaveBeenCalledWith(currentUser, {
       title: 'title',
       description: 'desc',
       body: 'body',
@@ -62,6 +62,7 @@ describe('ArticlesController', () => {
     expect(articlesService.toResponseDto).toHaveBeenCalledWith(
       article,
       'current-id',
+      { knownFavorited: false },
     );
     expect(result).toBe(articleResponse);
   });
@@ -128,22 +129,32 @@ describe('ArticlesController', () => {
     );
   });
 
-  it('favorite delegates to ArticlesService and returns the response dto', async () => {
+  it('favorite delegates to ArticlesService and returns the response dto with the known favorited state', async () => {
     const result = await controller.favorite('a-slug', currentUser);
 
     expect(articlesService.favorite).toHaveBeenCalledWith(
       'a-slug',
       'current-id',
     );
+    expect(articlesService.toResponseDto).toHaveBeenCalledWith(
+      article,
+      'current-id',
+      { knownFavorited: true },
+    );
     expect(result).toBe(articleResponse);
   });
 
-  it('unfavorite delegates to ArticlesService and returns the response dto', async () => {
+  it('unfavorite delegates to ArticlesService and returns the response dto with the known favorited state', async () => {
     const result = await controller.unfavorite('a-slug', currentUser);
 
     expect(articlesService.unfavorite).toHaveBeenCalledWith(
       'a-slug',
       'current-id',
+    );
+    expect(articlesService.toResponseDto).toHaveBeenCalledWith(
+      article,
+      'current-id',
+      { knownFavorited: false },
     );
     expect(result).toBe(articleResponse);
   });

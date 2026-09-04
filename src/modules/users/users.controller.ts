@@ -40,6 +40,6 @@ export class UsersController {
       dto,
       avatar,
     );
-    return UserResponseDto.fromEntity(updated, req.token ?? '');
+    return this.usersService.toResponseDto(updated, req.token ?? '');
   }
 }

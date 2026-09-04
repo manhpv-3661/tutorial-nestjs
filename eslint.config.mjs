@@ -10,6 +10,7 @@ export default tseslint.config(
       'eslint.config.mjs',
       'dist/**',
       'coverage/**',
+      'coverage-e2e*/**',
       'storage/**',
       '.sunlint-eslint.config.js',
     ],

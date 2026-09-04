@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { I18nService } from 'nestjs-i18n';
 import { RedisService } from '../../redis/redis.service';
 import { SALT_ROUNDS } from '../users/constants/users.constants';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import { User } from '../users/entities/user.entity';
 import { CreateUserData } from '../users/interfaces';
 import { UsersService } from '../users/users.service';
@@ -16,6 +17,7 @@ describe('AuthService', () => {
   let usersService: {
     findByEmail: jest.Mock<Promise<User | null>, [string]>;
     create: jest.Mock<Promise<User>, [CreateUserData]>;
+    toResponseDto: jest.Mock<UserResponseDto, [User, string]>;
   };
   let jwtService: {
     sign: jest.Mock<string, [{ sub: string }]>;
@@ -41,6 +43,11 @@ describe('AuthService', () => {
     usersService = {
       findByEmail: jest.fn<Promise<User | null>, [string]>(),
       create: jest.fn<Promise<User>, [CreateUserData]>(),
+      toResponseDto: jest
+        .fn<UserResponseDto, [User, string]>()
+        .mockImplementation((user, token) =>
+          UserResponseDto.fromEntity(user, token),
+        ),
     };
     jwtService = {
       sign: jest
@@ -137,6 +144,22 @@ describe('AuthService', () => {
       });
 
       expect(result.user.token).toBe('signed-token');
+    });
+  });
+
+  describe('getCurrentUser', () => {
+    it('wraps the user and token into a UserResponseDto', () => {
+      const user = buildUser({ bio: 'hi' });
+
+      const dto = authService.getCurrentUser(user, 'jwt-token');
+
+      expect(dto.user).toEqual({
+        username: 'jake',
+        email: 'jake@jake.jake',
+        bio: 'hi',
+        image: null,
+        token: 'jwt-token',
+      });
     });
   });
 

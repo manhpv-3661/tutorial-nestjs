@@ -15,6 +15,7 @@ import { AttachmentOwnerType } from '../attachments/entities/attachment.entity';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { User } from './entities/user.entity';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserResponseDto } from './dto/user-response.dto';
 import { CreateUserData, UpdateUserData } from './interfaces';
 import { SALT_ROUNDS } from './constants/users.constants';
 
@@ -108,6 +109,10 @@ export class UsersService {
 
       return this.updateById(userId, data, manager);
     });
+  }
+
+  toResponseDto(user: User, token: string): UserResponseDto {
+    return UserResponseDto.fromEntity(user, token);
   }
 
   private async buildUpdateData(dto: UpdateUserDto): Promise<UpdateUserData> {
